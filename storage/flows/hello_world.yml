@@ -1,0 +1,14 @@
+---
+START_NODE:
+  name: Hello World
+  description: A simple sample flow that logs a message and responds with success.
+  next: log_greeting
+log_greeting:
+  type: log_data
+  input: "Hello, World!"
+  next: send_response
+send_response:
+  type: respond_with_success
+  status: 200
+  body: "Hello, World!"
+
