@@ -74,17 +74,23 @@ module FlowStore
   end
 
   def safe_load(path)
-    YAML.safe_load_file(path, permitted_classes: [ Symbol ]) || {}
+    YAML.safe_load_file(path, permitted_classes: [ Symbol, ActiveSupport::HashWithIndifferentAccess ]) || {}
   end
 
   def write(path, data)
     FileUtils.mkdir_p(File.dirname(path))
-    File.write(path, data.to_yaml)
+    # Convert to plain Ruby hashes/arrays before serializing to avoid class-specific
+    # YAML tags (e.g. !ruby/hash:ActiveSupport::HashWithIndifferentAccess) that
+    # safe_load_file would reject on the next read.
+    File.write(path, JSON.parse(data.to_json).to_yaml)
   end
 
   def validate_id!(id)
-    unless id.is_a?(String) && id.match?(/\A[a-z0-9_\-]+\z/)
-      raise InvalidFlowData, "Flow id must contain only lowercase letters, digits, underscores and hyphens"
+    # DNS hostname label rules: lowercase letters, digits, and hyphens only.
+    # Must start and end with a letter or digit (no leading/trailing hyphens).
+    # Underscores are intentionally excluded — they are illegal in DNS names.
+    unless id.is_a?(String) && id.match?(/\A[a-z0-9]([a-z0-9\-]*[a-z0-9])?\z/)
+      raise InvalidFlowData, "Flow id must contain only lowercase letters, digits, and hyphens, and must not start or end with a hyphen"
     end
   end
 

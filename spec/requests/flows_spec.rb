@@ -35,18 +35,18 @@ RSpec.describe "Flows", type: :request do
     end
 
     it "returns summaries of existing flows" do
-      FlowStore.create("my_flow", valid_flow)
+      FlowStore.create("my-flow", valid_flow)
       get "/flows", headers: headers
       body = JSON.parse(response.body)
       expect(body.length).to eq(1)
-      expect(body.first["id"]).to eq("my_flow")
+      expect(body.first["id"]).to eq("my-flow")
     end
   end
 
   describe "GET /flows/:id" do
     it "returns 200 with flow and chain" do
-      FlowStore.create("my_flow", valid_flow)
-      get "/flows/my_flow", headers: headers
+      FlowStore.create("my-flow", valid_flow)
+      get "/flows/my-flow", headers: headers
       body = JSON.parse(response.body)
       expect(response).to have_http_status(:ok)
       expect(body["flow"]["START_NODE"]["name"]).to eq("Test Flow")
@@ -61,10 +61,10 @@ RSpec.describe "Flows", type: :request do
 
   describe "POST /flows" do
     it "creates a flow and returns 201" do
-      post "/flows", params: { id: "new_flow", flow: valid_flow }.to_json,
+      post "/flows", params: { id: "new-flow", flow: valid_flow }.to_json,
                      headers: headers.merge("Content-Type" => "application/json")
       expect(response).to have_http_status(:created)
-      expect(JSON.parse(response.body)["id"]).to eq("new_flow")
+      expect(JSON.parse(response.body)["id"]).to eq("new-flow")
     end
 
     it "returns 409 when id already exists" do
@@ -106,6 +106,46 @@ RSpec.describe "Flows", type: :request do
 
     it "returns 404 for unknown flow" do
       delete "/flows/ghost", headers: headers
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe "PATCH /flows/:id/permissions" do
+    before { FlowStore.create("shared-flow", valid_flow) }
+
+    it "sets public access and returns 200" do
+      patch "/flows/shared-flow/permissions",
+            params: { permissions: { public: true, shared_with: [] } }.to_json,
+            headers: headers.merge("Content-Type" => "application/json")
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body["permissions"]["public"]).to be true
+    end
+
+    it "sets shared_with users" do
+      patch "/flows/shared-flow/permissions",
+            params: { permissions: { public: false, shared_with: [ "alice", "bob" ] } }.to_json,
+            headers: headers.merge("Content-Type" => "application/json")
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body["permissions"]["shared_with"]).to contain_exactly("alice", "bob")
+    end
+
+    it "removes permissions key when both public and shared_with are blank" do
+      FlowStore.update("shared-flow", valid_flow.deep_merge("START_NODE" => { "permissions" => { "public" => true } }))
+      patch "/flows/shared-flow/permissions",
+            params: { permissions: { public: false, shared_with: [] } }.to_json,
+            headers: headers.merge("Content-Type" => "application/json")
+      expect(response).to have_http_status(:ok)
+      # permissions key is cleared from the YAML
+      reloaded = FlowStore.find("shared-flow")
+      expect(reloaded.dig("START_NODE", "permissions")).to be_nil
+    end
+
+    it "returns 404 for an unknown flow" do
+      patch "/flows/ghost/permissions",
+            params: { permissions: { public: true } }.to_json,
+            headers: headers.merge("Content-Type" => "application/json")
       expect(response).to have_http_status(:not_found)
     end
   end

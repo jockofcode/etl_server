@@ -47,6 +47,7 @@ module TransformSchema
     "less_than"            => { category: "logic", description: "True if input is less than value", fields: { "value" => VALUE } },
     "less_than_or_equal"   => { category: "logic", description: "True if input is <= value", fields: { "value" => VALUE } },
     "match"                => { category: "logic", description: "True if input matches the regex pattern", fields: { "pattern" => PATTERN } },
+    "if_else"              => { category: "logic", description: "Returns on_true if condition is met, otherwise on_false", fields: { "condition" => field("object", required: true, description: "Transform config evaluated as condition ({type:, ...})"), "on_true" => field("any", required: true, description: "Value returned when condition is truthy (supports {{interpolation}})"), "on_false" => field("any", description: "Value returned when condition is falsy (supports {{interpolation}})") } },
 
     # ── Text ──────────────────────────────────────────────────────────────────
     "concatenate"          => { category: "text", description: "Appends value to the input string", fields: { "value" => field("string") } },
@@ -96,6 +97,7 @@ module TransformSchema
     "list_get_index"           => { category: "lists", description: "Returns the index of value in the list, or -1", fields: { "value" => VALUE } },
     "filter_matches"           => { category: "lists", description: "Keeps items where key equals value", fields: { "key" => KEY, "value" => VALUE } },
     "filter_non_matches"       => { category: "lists", description: "Keeps items where key does not equal value", fields: { "key" => KEY, "value" => VALUE } },
+    "compact"                  => { category: "lists", description: "Removes nil and empty-string items from the list", fields: {} },
     "filter_unique"            => { category: "lists", description: "Removes duplicate items", fields: {} },
     "filter_unique_by_key"     => { category: "lists", description: "Removes items with duplicate values at key", fields: { "key" => KEY } },
     "join_list"                => { category: "lists", description: "Joins list items into a string", fields: { "separator" => field("string", description: "Separator (default ', ')") } },

@@ -63,6 +63,28 @@ class FlowsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # PATCH /flows/:id/permissions
+  def update_permissions
+    flow_data = FlowStore.find(params[:id])
+    perms = params[:permissions] || {}
+
+    is_public   = perms[:public] == true || perms[:public] == "true"
+    shared_with = Array(perms[:shared_with]).map { |u| u.to_s.strip }.reject(&:empty?).uniq
+
+    if is_public || shared_with.any?
+      new_perms = { "public" => is_public }
+      new_perms["shared_with"] = shared_with if shared_with.any?
+      flow_data["START_NODE"]["permissions"] = new_perms
+    else
+      flow_data["START_NODE"].delete("permissions")
+    end
+
+    FlowStore.update(params[:id], flow_data)
+    render json: { id: params[:id], permissions: flow_data.dig("START_NODE", "permissions") || {} }
+  rescue FlowStore::FlowNotFound => e
+    render json: { error: e.message }, status: :not_found
+  end
+
   private
 
   # Strip invalid fields from every non-START_NODE node based on command type.

@@ -33,6 +33,27 @@ RSpec.describe "Auth::Sessions", type: :request do
       end
     end
 
+    context "with username instead of email" do
+      let!(:user_with_username) { create(:user, email: "named@example.com", password: "password123", username: "nameduser") }
+
+      it "returns 200 and a JWT token" do
+        post "/auth/login", params: { email: "nameduser", password: "password123" },
+                            as: :json
+
+        expect(response).to have_http_status(:ok)
+        body = JSON.parse(response.body)
+        expect(body["token"]).to be_present
+        expect(body["user"]["email"]).to eq("named@example.com")
+      end
+
+      it "is case-insensitive on username" do
+        post "/auth/login", params: { email: "NAMEDUSER", password: "password123" },
+                            as: :json
+
+        expect(response).to have_http_status(:ok)
+      end
+    end
+
     context "with unknown email" do
       it "returns 401" do
         post "/auth/login", params: { email: "nobody@example.com", password: "password123" },

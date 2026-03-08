@@ -15,6 +15,9 @@ gem "bcrypt", "~> 3.1.7"
 # JWT authentication
 gem "jwt", "~> 2.9"
 
+# ETL flow execution engine
+gem "etl_engine", path: "../etl_engine"
+
 # Use Rack CORS for handling Cross-Origin Resource Sharing (CORS), making cross-origin Ajax possible
 gem "rack-cors"
 

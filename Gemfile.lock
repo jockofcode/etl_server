@@ -1,3 +1,9 @@
+PATH
+  remote: ../etl_engine
+  specs:
+    etl_engine (0.1.0)
+      nokogiri (~> 1.16)
+
 GEM
   remote: https://rubygems.org/
   specs:
@@ -368,6 +374,7 @@ DEPENDENCIES
   brakeman
   database_cleaner-active_record (~> 2.2)
   debug
+  etl_engine!
   factory_bot_rails (~> 6.4)
   jwt (~> 2.9)
   kamal

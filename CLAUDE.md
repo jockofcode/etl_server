@@ -77,7 +77,9 @@ GET    /up                  # health check
 ```
 
 ### Flow ID Rules
-Flow IDs are filenames: must match `/\A[a-z0-9_\-]+\z/`.
+Flow IDs are DNS-safe hostname labels: must match `/\A[a-z0-9]([a-z0-9\-]*[a-z0-9])?\z/`.
+Lowercase letters, digits, and hyphens only. No underscores. Cannot start or end with a hyphen.
+This ensures every flow ID is a valid `*.etl.cnxkit.com` subdomain.
 
 ### Testing Conventions
 - Request specs live in `spec/requests/` mirroring controller namespacing

@@ -31,7 +31,7 @@ RSpec.describe FlowChain do
       end
     end
 
-    context "with a check_data fork" do
+    context "with a check_data fork (single targets)" do
       let(:flow_data) do
         {
           "START_NODE" => { "name" => "Fork", "next" => "check" },
@@ -41,21 +41,46 @@ RSpec.describe FlowChain do
         }
       end
 
-      it "includes on_success and on_failure branches" do
+      it "wraps single on_success/on_failure targets in an outer array of chains" do
         result = FlowChain.build(flow_data)
         check_step = result[:chain].find { |s| s[:key] == "check" }
 
+        # branches[:on_success] is [[...chain...]] — one chain per target
         expect(check_step[:branches][:on_success]).to be_an(Array)
-        expect(check_step[:branches][:on_success].first[:key]).to eq("ok_node")
+        expect(check_step[:branches][:on_success].length).to eq(1)
+        expect(check_step[:branches][:on_success].first).to be_an(Array)
+        expect(check_step[:branches][:on_success].first.first[:key]).to eq("ok_node")
 
-        expect(check_step[:branches][:on_failure]).to be_an(Array)
-        expect(check_step[:branches][:on_failure].first[:key]).to eq("err_node")
+        expect(check_step[:branches][:on_failure].length).to eq(1)
+        expect(check_step[:branches][:on_failure].first.first[:key]).to eq("err_node")
       end
 
       it "does not follow next for check_data nodes" do
         result = FlowChain.build(flow_data)
         keys = result[:chain].map { |s| s[:key] }
         expect(keys).to eq(%w[check])
+      end
+    end
+
+    context "with a check_data fork (multiple targets — fan-out)" do
+      let(:flow_data) do
+        {
+          "START_NODE" => { "name" => "Fan-out", "next" => "check" },
+          "check"      => { "type" => "check_data", "input" => "{{x}}", "check" => { "type" => "exists" },
+                            "on_success" => %w[ok_a ok_b], "on_failure" => "err_node" },
+          "ok_a"       => { "type" => "log_data", "input" => "a" },
+          "ok_b"       => { "type" => "respond_with_success" },
+          "err_node"   => { "type" => "respond_with_error" }
+        }
+      end
+
+      it "produces one chain per on_success target" do
+        result = FlowChain.build(flow_data)
+        check_step = result[:chain].find { |s| s[:key] == "check" }
+
+        expect(check_step[:branches][:on_success].length).to eq(2)
+        expect(check_step[:branches][:on_success][0].first[:key]).to eq("ok_a")
+        expect(check_step[:branches][:on_success][1].first[:key]).to eq("ok_b")
       end
     end
 
@@ -80,6 +105,31 @@ RSpec.describe FlowChain do
         result = FlowChain.build(flow_data)
         keys = result[:chain].map { |s| s[:key] }
         expect(keys).to include("each", "done")
+      end
+    end
+
+    context "with an array next (fan-out from a linear node)" do
+      let(:flow_data) do
+        {
+          "START_NODE" => { "name" => "Multi-next", "next" => "entry" },
+          "entry"      => { "type" => "transform_data", "input" => "x", "next" => %w[branch_a branch_b] },
+          "branch_a"   => { "type" => "log_data", "input" => "a" },
+          "branch_b"   => { "type" => "respond_with_success" }
+        }
+      end
+
+      it "produces next_branches with one chain per target" do
+        result = FlowChain.build(flow_data)
+        entry_step = result[:chain].find { |s| s[:key] == "entry" }
+        expect(entry_step[:branches][:next_branches].length).to eq(2)
+        expect(entry_step[:branches][:next_branches][0].first[:key]).to eq("branch_a")
+        expect(entry_step[:branches][:next_branches][1].first[:key]).to eq("branch_b")
+      end
+
+      it "does not continue the main chain after the fan-out node" do
+        result = FlowChain.build(flow_data)
+        keys = result[:chain].map { |s| s[:key] }
+        expect(keys).to eq(%w[entry])
       end
     end
 
