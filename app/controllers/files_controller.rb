@@ -211,6 +211,29 @@ class FilesController < ApplicationController
     end
   end
 
+  # POST /nas/mkdir  body: { path: "folder/sub" }
+  def nas_mkdir
+    return render json: { error: "NAS not configured" }, status: :unauthorized unless @current_user.smb_connected?
+
+    path = params[:path].to_s.strip
+    return render json: { error: "Path required" }, status: :bad_request if path.blank?
+    return render json: { error: "Invalid path" }, status: :bad_request if path =~ /["\\\x00]/
+
+    result = SmbClient.mkdir(
+      share:    @current_user.smb_username,
+      path:     path,
+      username: @current_user.smb_username,
+      password: @current_user.smb_password
+    )
+
+    if result[:success]
+      render json: { ok: true }
+    else
+      msg = result[:error].to_s.lines.grep_v(/^$/).last&.strip || "Failed to create folder"
+      render json: { error: msg }, status: :unprocessable_entity
+    end
+  end
+
   # POST /nas/copy  body: { local_path:, nas_path: }
   def nas_copy
     return render json: { error: "NAS not configured" }, status: :unauthorized unless @current_user.smb_connected?
@@ -665,11 +688,20 @@ class FilesController < ApplicationController
             <h3 id="nasCopyTitle">Copy to NAS</h3>
             <p style="font-size:.8rem;color:#6b7280;margin-bottom:.4rem">Choose a destination folder on the NAS:</p>
             <div class="dir-list" id="nasCopyDirList"><div class="dir-list-loading">Loading&hellip;</div></div>
+            <div style="display:flex;align-items:center;gap:.4rem;padding:.4rem .1rem 0">
+              <input type="text" id="nasCopyNewFolder" placeholder="New folder name&hellip;" style="flex:1;font-size:.78rem;padding:.28rem .55rem;border:1px solid #d1d5db;border-radius:5px;outline:none">
+              <button class="btn btn-secondary" style="font-size:.75rem;white-space:nowrap" onclick="createNasCopyFolder()">&#128193; Create</button>
+            </div>
             <div class="modal-actions">
               <button class="btn btn-secondary" onclick="closeModal('nasCopyModal')">Cancel</button>
               <button class="btn btn-primary" id="nasCopyConfirmBtn" onclick="confirmNasCopy()">Copy Here</button>
             </div>
           </div>
+        </div>
+
+        <!-- NAS browser context menu -->
+        <div class="ctx" id="nasCtx">
+          <button onclick="openNasNewFolderPrompt()">&#128193;&ensp;New Folder</button>
         </div>
 
         <script>
@@ -971,7 +1003,7 @@ class FilesController < ApplicationController
           // Keyboard shortcuts
           document.addEventListener('keydown', e => {
             if (e.key === 'Escape') {
-              hideCtx();
+              hideCtx(); hideNasCtx();
               closeModal('infoModal'); closeModal('createDirModal'); closeModal('moveModal');
               closeModal('nasCredModal'); closeModal('nasBrowserModal'); closeModal('nasCopyModal');
             }
@@ -1137,6 +1169,63 @@ class FilesController < ApplicationController
               }
             } catch (e) {
               btn.textContent = orig; btn.disabled = false;
+            }
+          }
+
+          // ── NAS browser context menu ──────────────────────────────────────
+
+          const nasCtx = document.getElementById('nasCtx');
+
+          document.getElementById('nasList').addEventListener('contextmenu', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            document.addEventListener('click', hideNasCtx, { once: true });
+            nasCtx.style.left = '-9999px'; nasCtx.style.top = '-9999px';
+            nasCtx.classList.add('visible');
+            nasCtx.style.left = Math.min(e.clientX, window.innerWidth  - nasCtx.offsetWidth  - 8) + 'px';
+            nasCtx.style.top  = Math.min(e.clientY, window.innerHeight - nasCtx.offsetHeight - 8) + 'px';
+          });
+
+          function hideNasCtx() { nasCtx.classList.remove('visible'); }
+
+          async function openNasNewFolderPrompt() {
+            hideNasCtx();
+            const name = prompt('New folder name:');
+            if (!name) return;
+            if (/["\\\/\x00]/.test(name)) { alert('Invalid folder name'); return; }
+            const fullPath = nasBrowsePath ? nasBrowsePath + '/' + name : name;
+            const r = await fetch('/nas/mkdir', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: fullPath })
+            });
+            const d = await r.json();
+            if (d.ok) {
+              openNasBrowser(nasBrowsePath); // refresh current view
+            } else {
+              alert('Error: ' + (d.error || 'Failed to create folder'));
+            }
+          }
+
+          // ── NAS copy-folder creation ───────────────────────────────────────
+
+          async function createNasCopyFolder() {
+            const input = document.getElementById('nasCopyNewFolder');
+            const name  = input.value.trim();
+            if (!name) return;
+            if (/["\\\/\x00]/.test(name)) { alert('Invalid folder name'); return; }
+            const fullPath = nasCopyDest ? nasCopyDest + '/' + name : name;
+            const r = await fetch('/nas/mkdir', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: fullPath })
+            });
+            const d = await r.json();
+            if (d.ok) {
+              input.value = '';
+              loadNasCopyDirs(fullPath); // navigate into newly created folder
+            } else {
+              alert('Error: ' + (d.error || 'Failed to create folder'));
             }
           }
 

@@ -42,6 +42,12 @@ module SmbClient
         command: "#{cd_part}lcd \"#{local_dir}\"; get \"#{remote_file}\" \"#{local_file}\"")
   end
 
+  # Create a directory on the share. path is slash-separated.
+  def self.mkdir(share:, path:, username:, password:)
+    run(share: share, username: username, password: password,
+        command: "mkdir \"#{smb_path(path)}\"")
+  end
+
   # Quick connectivity check — just lists the root of the share.
   def self.test(share:, username:, password:)
     run(share: share, username: username, password: password, command: "ls *")
