@@ -1059,7 +1059,7 @@ class FilesController < ApplicationController
             }
           }
 
-          async function openNasBrowser(path) {
+          async function openNasBrowser(path = '') {
             nasBrowsePath = path;
             document.getElementById('nasBrowserModal').removeAttribute('hidden');
             document.getElementById('nasList').innerHTML = '<div class="dir-list-loading">Loading\u2026</div>';
@@ -1074,10 +1074,10 @@ class FilesController < ApplicationController
 
             // Breadcrumb
             const parts = path.split('/').filter(Boolean);
-            let crumbs = '<span class="nas-crumb" onclick="openNasBrowser(\'\')">NAS root</span>';
+            let crumbs = `<span class="nas-crumb" onclick="openNasBrowser()">NAS root</span>`;
             parts.forEach((p, i) => {
               const sub = parts.slice(0, i + 1).join('/');
-              crumbs += ' \u203a <span class="nas-crumb" onclick="openNasBrowser(\'' + esc(sub) + '\')">' + esc(p) + '</span>';
+              crumbs += ` \u203a <span class="nas-crumb" onclick="openNasBrowser('${esc(sub)}')">${esc(p)}</span>`;
             });
             document.getElementById('nasBreadcrumb').innerHTML = crumbs;
 
@@ -1092,8 +1092,7 @@ class FilesController < ApplicationController
             const parts2 = path.split('/').filter(Boolean);
             const parentPath = parts2.slice(0, -1).join('/');
             let html = path
-              ? '<div class="nas-row nas-dir" onclick="openNasBrowser(\'' + esc(parentPath) + '\')">' +
-                '<span style="font-size:1rem">&#8617;</span><span class="nas-row-name" style="color:#2563eb">Up</span></div>'
+              ? `<div class="nas-row nas-dir" onclick="openNasBrowser('${esc(parentPath)}')"><span style="font-size:1rem">&#8617;</span><span class="nas-row-name" style="color:#2563eb">Up</span></div>`
               : '';
 
             html += items.map(item => {
@@ -1103,20 +1102,9 @@ class FilesController < ApplicationController
               const iName = esc(item.name);
 
               if (item.type === 'dir') {
-                return '<div class="nas-row nas-dir" onclick="openNasBrowser(\'' + iPath + '\')">' +
-                       '<span style="font-size:1rem">' + icon + '</span>' +
-                       '<span class="nas-row-name">' + iName + '</span>' +
-                       '<span class="nas-row-size">&mdash;</span>' +
-                       '</div>';
+                return `<div class="nas-row nas-dir" onclick="openNasBrowser('${iPath}')"><span style="font-size:1rem">${icon}</span><span class="nas-row-name">${iName}</span><span class="nas-row-size">&mdash;</span></div>`;
               } else {
-                return '<div class="nas-row">' +
-                       '<span style="font-size:1rem">' + icon + '</span>' +
-                       '<span class="nas-row-name" title="' + iName + '">' + iName + '</span>' +
-                       '<span class="nas-row-size">' + humanizeBytes(item.size) + '</span>' +
-                       '<div class="nas-row-actions">' +
-                       '<button class="nas-action-btn" onclick="nasDownload(\'' + iPath + '\',\'' + iName + '\')">&#8659; Download</button>' +
-                       '<button class="nas-action-btn" onclick="nasCopyToLocal(\'' + iPath + '\',this)">&#8594; Local</button>' +
-                       '</div></div>';
+                return `<div class="nas-row"><span style="font-size:1rem">${icon}</span><span class="nas-row-name" title="${iName}">${iName}</span><span class="nas-row-size">${humanizeBytes(item.size)}</span><div class="nas-row-actions"><button class="nas-action-btn" onclick="nasDownload('${iPath}','${iName}')">&#8659; Download</button><button class="nas-action-btn" onclick="nasCopyToLocal('${iPath}',this)">&#8594; Local</button></div></div>`;
               }
             }).join('');
 
@@ -1188,15 +1176,13 @@ class FilesController < ApplicationController
             const parent = parts.slice(0, -1).join('/');
             let html = '';
             if (path) {
-              html += '<div class="dir-item" onclick="loadNasCopyDirs(\'' + esc(parent) + '\')" style="cursor:pointer">&#8617; Up</div>';
+              html += `<div class="dir-item" onclick="loadNasCopyDirs('${esc(parent)}')" style="cursor:pointer">&#8617; Up</div>`;
             }
             const currentLabel = path || 'NAS root';
-            html += '<div class="dir-item selected-dest" style="cursor:default">&#128194; ' +
-                    esc(currentLabel) + ' <span style="font-size:.7rem">(copy here)</span></div>';
+            html += `<div class="dir-item selected-dest" style="cursor:default">&#128194; ${esc(currentLabel)} <span style="font-size:.7rem">(copy here)</span></div>`;
             html += dirs.map(dir => {
               const dirPath = path ? path + '/' + dir.name : dir.name;
-              return '<div class="dir-item" onclick="loadNasCopyDirs(\'' + esc(dirPath) + '\')" style="cursor:pointer">' +
-                     '&#128193; ' + esc(dir.name) + '</div>';
+              return `<div class="dir-item" onclick="loadNasCopyDirs('${esc(dirPath)}')" style="cursor:pointer">&#128193; ${esc(dir.name)}</div>`;
             }).join('');
             document.getElementById('nasCopyDirList').innerHTML = html || '<div class="dir-list-loading">No subfolders</div>';
           }
