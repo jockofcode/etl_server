@@ -1002,12 +1002,16 @@ class FilesController < ApplicationController
           }).catch(() => {});
 
           async function openNas() {
-            const d = await fetch('/nas/status').then(r => r.json());
-            nasConnected = d.connected;
-            if (nasConnected) {
-              document.getElementById('nasShareLabel').textContent = d.username;
-              openNasBrowser('');
-            } else {
+            try {
+              const d = await fetch('/nas/status').then(r => r.json());
+              nasConnected = d.connected;
+              if (nasConnected) {
+                document.getElementById('nasShareLabel').textContent = d.username;
+                openNasBrowser('');
+              } else {
+                openNasCredentials();
+              }
+            } catch (e) {
               openNasCredentials();
             }
           }
