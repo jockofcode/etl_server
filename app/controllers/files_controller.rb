@@ -249,20 +249,24 @@ class FilesController < ApplicationController
     return render json: { error: "Invalid local path" }, status: :bad_request unless local&.file?
 
     nas_path = params[:nas_path].to_s.strip
-    if local.basename.to_s =~ /["\\\x00]/ || nas_path =~ /["\\\x00]/
-      return render json: { error: "Path contains unsupported characters" }, status: :bad_request
-    end
+    return render json: { error: "Invalid NAS path" }, status: :bad_request if nas_path =~ /["\\\x00]/
+
+    # Windows/NTFS forbids: \ / : * ? " < > | — replace with underscores so the
+    # upload doesn't get NT_STATUS_ACCESS_DENIED for characters like ':' in timestamps.
+    nas_filename = local.basename.to_s.gsub(/[\\\/:\*\?"<>|]/, "_")
 
     result = SmbClient.put(
-      share:       @current_user.smb_username,
-      local_path:  local.to_s,
-      remote_path: nas_path,
-      username:    @current_user.smb_username,
-      password:    @current_user.smb_password
+      share:        @current_user.smb_username,
+      local_path:   local.to_s,
+      remote_path:  nas_path,
+      nas_filename: nas_filename,
+      username:     @current_user.smb_username,
+      password:     @current_user.smb_password
     )
 
     if result[:success]
-      render json: { ok: true }
+      renamed = nas_filename != local.basename.to_s
+      render json: { ok: true, nas_filename: nas_filename, renamed: renamed }
     else
       msg = result[:error].to_s.lines.grep_v(/^$/).last&.strip || "Copy failed"
       render json: { error: msg }, status: :unprocessable_entity
@@ -1313,7 +1317,11 @@ class FilesController < ApplicationController
               const d = await r.json();
               if (r.ok) {
                 closeModal('nasCopyModal');
-                alert('\u2705 "' + nasCopySource.split('/').pop() + '" copied to NAS successfully.');
+                const origName = nasCopySource.split('/').pop();
+                const msg = d.renamed
+                  ? `\u2705 Copied to NAS as "${d.nas_filename}" (renamed from "${origName}" — colons and other Windows-invalid characters were replaced with underscores).`
+                  : `\u2705 "${origName}" copied to NAS successfully.`;
+                alert(msg);
               } else {
                 alert('Error: ' + (d.error || 'Copy failed'));
               }

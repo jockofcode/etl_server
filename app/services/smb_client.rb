@@ -20,13 +20,17 @@ module SmbClient
   end
 
   # Copy a local file to the share. remote_path is the destination directory
-  # within the share (slash-separated, empty = root).
-  def self.put(share:, local_path:, remote_path:, username:, password:)
-    local_dir  = File.dirname(local_path)
-    local_file = File.basename(local_path)
-    cd_part    = remote_path.blank? ? "" : "cd \"#{smb_path(remote_path)}\"; "
+  # within the share (slash-separated, empty = root). nas_filename overrides
+  # the remote filename (use to sanitize Windows-invalid characters).
+  def self.put(share:, local_path:, remote_path:, username:, password:, nas_filename: nil)
+    local_dir   = File.dirname(local_path)
+    local_file  = File.basename(local_path)
+    remote_file = nas_filename || local_file
+    cd_part     = remote_path.blank? ? "" : "cd \"#{smb_path(remote_path)}\"; "
+    put_cmd     = remote_file == local_file ? "put \"#{local_file}\"" \
+                                            : "put \"#{local_file}\" \"#{remote_file}\""
     run(share: share, username: username, password: password,
-        command: "#{cd_part}lcd \"#{local_dir}\"; put \"#{local_file}\"")
+        command: "#{cd_part}lcd \"#{local_dir}\"; #{put_cmd}")
   end
 
   # Download a file from the share to a local path.
