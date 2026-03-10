@@ -24,9 +24,9 @@ module SmbClient
   def self.put(share:, local_path:, remote_path:, username:, password:)
     local_dir  = File.dirname(local_path)
     local_file = File.basename(local_path)
-    dest       = remote_path.blank? ? local_file : "#{smb_path(remote_path)}\\#{local_file}"
+    cd_part    = remote_path.blank? ? "" : "cd \"#{smb_path(remote_path)}\"; "
     run(share: share, username: username, password: password,
-        command: "lcd \"#{local_dir}\"; put \"#{local_file}\" \"#{dest}\"")
+        command: "#{cd_part}lcd \"#{local_dir}\"; put \"#{local_file}\"")
   end
 
   # Download a file from the share to a local path.
@@ -67,7 +67,10 @@ module SmbClient
       end
     end
 
-    { success: exit_status&.success?, output: stdout, error: stderr }
+    # smbclient often writes NT_STATUS errors to stdout, not stderr.
+    # Merge both so callers always see the real error message.
+    combined_error = [ stderr, stdout ].map(&:strip).reject(&:empty?).join("\n")
+    { success: exit_status&.success?, output: stdout, error: combined_error }
   rescue Timeout::Error
     { success: false, output: "", error: "Connection timed out after #{SMB_TIMEOUT}s" }
   rescue => e
