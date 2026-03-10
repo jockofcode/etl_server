@@ -5,6 +5,7 @@ require_relative "../services/smb_client"
 
 class FilesController < ApplicationController
   before_action :require_browser_auth
+  skip_before_action :require_browser_auth, only: [:logout]
 
   # GET /?path=
   def index
@@ -105,6 +106,12 @@ class FilesController < ApplicationController
   end
 
   # ── NAS (SMB) actions ──────────────────────────────────────────────────────
+
+  # GET /logout
+  def logout
+    cookies.delete(:_etl_browser_uid, domain: ".cnxkit.com")
+    redirect_to "https://etl.cnxkit.com/", allow_other_host: true
+  end
 
   # GET /nas/status
   def nas_status
@@ -563,6 +570,7 @@ class FilesController < ApplicationController
           <h1>&#128193; Files</h1>
           <span class="meta">#{count_str} &nbsp;&middot;&nbsp; #{username}</span>
           <button class="nas-btn" id="nasHeaderBtn" onclick="openNas()">&#128427; NAS</button>
+          <a href="/logout" class="nas-btn" style="color:#dc2626;border-color:#fecaca;text-decoration:none">&#10148; Logout</a>
         </header>
 
         <nav class="breadcrumb">#{breadcrumb}</nav>
@@ -649,11 +657,11 @@ class FilesController < ApplicationController
         <!-- NAS credentials modal -->
         <div class="overlay" id="nasCredModal" hidden>
           <div class="modal">
-            <h3>&#128427; Connect to NAS</h3>
-            <p style="font-size:.82rem;color:#6b7280;margin-bottom:.75rem">
+            <h3 id="nasCredTitle">&#128427; Connect to NAS</h3>
+            <p id="nasCredDesc" style="font-size:.82rem;color:#6b7280;margin-bottom:.75rem">
               Enter your TrueNAS username (your first name) and password to link your NAS share.
             </p>
-            <label>Username</label>
+            <label id="nasUsernameLabel">Username</label>
             <input type="text" id="nasUsernameInput" placeholder="e.g. kalob" autocomplete="off" spellcheck="false">
             <label>Password</label>
             <input type="password" id="nasPasswordInput" placeholder="NAS password" autocomplete="new-password">
@@ -1019,6 +1027,7 @@ class FilesController < ApplicationController
           // ── NAS ──────────────────────────────────────────────────────────
 
           let nasConnected  = false;
+          let nasUsername   = '';     // saved NAS username
           let nasCopySource = null;   // local relative path being copied to NAS
           let nasCopyDest   = '';     // current directory selected in NAS copy modal
           let nasBrowsePath = '';     // current path shown in NAS browser
@@ -1026,6 +1035,7 @@ class FilesController < ApplicationController
           // Initialise NAS button state on page load
           fetch('/nas/status').then(r => r.json()).then(d => {
             nasConnected = d.connected;
+            nasUsername  = d.username || '';
             const btn = document.getElementById('nasHeaderBtn');
             if (d.connected) {
               btn.classList.add('connected');
@@ -1037,6 +1047,7 @@ class FilesController < ApplicationController
             try {
               const d = await fetch('/nas/status').then(r => r.json());
               nasConnected = d.connected;
+              nasUsername  = d.username || '';
               if (nasConnected) {
                 document.getElementById('nasShareLabel').textContent = d.username;
                 openNasBrowser('');
@@ -1050,11 +1061,23 @@ class FilesController < ApplicationController
 
           function openNasCredentials() {
             closeModal('nasBrowserModal');
-            document.getElementById('nasUsernameInput').value = '';
+            const changing = nasConnected && nasUsername;
+            document.getElementById('nasCredTitle').textContent =
+              changing ? '\u{1F5AB} Change NAS Password' : '\u{1F5AB} Connect to NAS';
+            document.getElementById('nasCredDesc').textContent = changing
+              ? 'Enter a new password for your NAS account. Username is pre-filled.'
+              : 'Enter your TrueNAS username (your first name) and password to link your NAS share.';
+            document.getElementById('nasUsernameInput').value = changing ? nasUsername : '';
+            document.getElementById('nasUsernameLabel').textContent = changing ? 'Username (read-only)' : 'Username';
+            document.getElementById('nasUsernameInput').readOnly = changing;
             document.getElementById('nasPasswordInput').value = '';
             document.getElementById('nasCredError').hidden = true;
+            document.getElementById('nasCredSaveBtn').textContent = changing ? 'Update Password' : 'Connect';
             document.getElementById('nasCredModal').removeAttribute('hidden');
-            setTimeout(() => document.getElementById('nasUsernameInput').focus(), 50);
+            setTimeout(() => {
+              const focus = changing ? 'nasPasswordInput' : 'nasUsernameInput';
+              document.getElementById(focus).focus();
+            }, 50);
           }
 
           async function saveNasCredentials() {
@@ -1076,6 +1099,7 @@ class FilesController < ApplicationController
               const d = await r.json();
               if (r.ok) {
                 nasConnected = true;
+                nasUsername  = username;
                 const hBtn = document.getElementById('nasHeaderBtn');
                 hBtn.classList.add('connected');
                 hBtn.innerHTML = '&#128427; NAS &mdash; ' + esc(username);

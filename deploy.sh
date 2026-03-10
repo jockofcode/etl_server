@@ -12,6 +12,8 @@ git pull origin main
 
 # Install dependencies
 echo "📦 Installing Ruby gems..."
+# Clear any inherited Ruby/Bundler env vars (e.g. from parent process running a different Ruby version)
+unset GEM_HOME GEM_PATH GEM_ROOT BUNDLE_BIN_PATH BUNDLE_GEMFILE RUBYOPT RUBYLIB RUBY_ENGINE RUBY_ROOT RUBY_VERSION
 source ~/.asdf/asdf.sh
 bundle install
 

@@ -11,6 +11,7 @@ Rails.application.routes.draw do
   # from that host (via X-Files-Host nginx header) so ActionDispatch::Static
   # never serves public/index.html for these requests.
   scope "/__fh" do
+    get    "/logout",        to: "files#logout"
     get    "/",              to: "files#index"
     post   "/upload",        to: "files#upload"
     post   "/mkdir",         to: "files#mkdir"
