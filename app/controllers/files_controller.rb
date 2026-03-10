@@ -268,7 +268,13 @@ class FilesController < ApplicationController
       renamed = nas_filename != local.basename.to_s
       render json: { ok: true, nas_filename: nas_filename, renamed: renamed }
     else
-      msg = result[:error].to_s.lines.grep_v(/^$/).last&.strip || "Copy failed"
+      raw = result[:error].to_s
+      msg = if raw.include?("NT_STATUS_ACCESS_DENIED")
+              "Access denied — the NAS share does not allow writes. " \
+              "Check that your TrueNAS SMB share and dataset ACLs grant write access to your account."
+            else
+              raw.lines.grep_v(/^$/).last&.strip || "Copy failed"
+            end
       render json: { error: msg }, status: :unprocessable_entity
     end
   end
