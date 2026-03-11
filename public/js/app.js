@@ -4,6 +4,7 @@ import { mount as mountLogin }      from './pages/login.js';
 import { mount as mountFlows }      from './pages/flows.js';
 import { mount as mountFlowDetail } from './pages/flow-detail.js';
 import { mount as mountAccount }    from './pages/account.js';
+import { mount as mountAdmin }      from './pages/admin.js';
 
 const app = document.getElementById('app');
 
@@ -29,6 +30,11 @@ on('/flows/:id', ({ id }) => {
 on('/account', () => {
   if (!isLoggedIn()) { go('/login'); return; }
   mountAccount(app);
+});
+
+on('/admin', () => {
+  if (!isLoggedIn()) { go('/login'); return; }
+  mountAdmin(app);
 });
 
 init();

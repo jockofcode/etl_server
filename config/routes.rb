@@ -52,4 +52,8 @@ Rails.application.routes.draw do
     get "commands",   to: "schemas#commands"
     get "transforms", to: "schemas#transforms"
   end
+
+  namespace :admin do
+    resources :users, only: %i[index create update destroy]
+  end
 end

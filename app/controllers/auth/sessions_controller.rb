@@ -8,7 +8,7 @@ module Auth
       if user&.authenticate(params[:password])
         token = JwtAuthenticatable.generate_token(user.id)
         set_browser_session_cookie(user.id)
-        render json: { token: token, user: { id: user.id, email: user.email } }, status: :ok
+        render json: { token: token, user: { id: user.id, email: user.email, is_admin: user.is_admin } }, status: :ok
       else
         render json: { error: "Invalid email or password" }, status: :unauthorized
       end

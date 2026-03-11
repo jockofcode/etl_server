@@ -3,11 +3,16 @@
 # The data can then be loaded with the bin/rails db:seed command (or created alongside the database with db:setup).
 
 # Seed admin user
-unless User.exists?(email: "admin@example.com")
-  User.create!(
-    email:                 "admin@example.com",
+user = User.find_or_initialize_by(email: "admin@example.com")
+if user.new_record?
+  user.assign_attributes(
     password:              "password123",
-    password_confirmation: "password123"
+    password_confirmation: "password123",
+    is_admin:              true
   )
-  puts "Created seed user: admin@example.com / password123"
+  user.save!
+  puts "Created seed user: admin@example.com / password123 (admin)"
+elsif !user.is_admin?
+  user.update!(is_admin: true)
+  puts "Granted admin to existing seed user: admin@example.com"
 end

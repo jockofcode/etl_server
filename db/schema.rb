@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_08_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_11_000001) do
   create_table "api_tokens", force: :cascade do |t|
     t.integer "user_id", null: false
     t.string "token", null: false
@@ -30,6 +30,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_08_000001) do
     t.string "username"
     t.string "smb_username"
     t.text "smb_password_ciphertext"
+    t.boolean "is_admin", default: false, null: false
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["username"], name: "index_users_on_username", unique: true
   end

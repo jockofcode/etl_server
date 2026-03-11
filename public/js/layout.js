@@ -1,4 +1,4 @@
-import { logout } from './api.js';
+import { logout, isAdmin } from './api.js';
 import { go } from './router.js';
 
 export function renderHeader() {
@@ -11,6 +11,7 @@ export function renderHeader() {
       <nav class="header-nav">
         <a href="#/flows"   class="nav-link">Flows</a>
         <a href="#/account" class="nav-link">Account</a>
+        ${isAdmin() ? '<a href="#/admin" class="nav-link">Admin</a>' : ''}
         <button class="btn btn-outline btn-sm" id="logout-btn">Sign Out</button>
       </nav>
     </header>
