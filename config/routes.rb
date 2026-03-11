@@ -29,6 +29,7 @@ Rails.application.routes.draw do
     get  "/nas/download/*path",   to: "files#nas_download",      format: false
     post "/nas/copy-from-nas",    to: "files#nas_copy_from_nas"
     post "/nas/mkdir",            to: "files#nas_mkdir"
+    get  "/nas/transfers",        to: "files#nas_transfers"
   end
 
   namespace :auth do

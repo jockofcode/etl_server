@@ -255,28 +255,33 @@ class FilesController < ApplicationController
     # upload doesn't get NT_STATUS_ACCESS_DENIED for characters like ':' in timestamps.
     nas_filename = local.basename.to_s.gsub(/[\\\/:\*\?"<>|]/, "_")
 
-    result = SmbClient.put(
-      share:        @current_user.smb_username,
+    transfer = NasCopyTransfer.create!(
+      user:         @current_user,
       local_path:   local.to_s,
-      remote_path:  nas_path,
+      nas_path:     nas_path,
       nas_filename: nas_filename,
-      username:     @current_user.smb_username,
-      password:     @current_user.smb_password
+      status:       "queued"
     )
+    NasCopyJob.perform_later(transfer.id)
 
-    if result[:success]
-      renamed = nas_filename != local.basename.to_s
-      render json: { ok: true, nas_filename: nas_filename, renamed: renamed }
-    else
-      raw = result[:error].to_s
-      msg = if raw.include?("NT_STATUS_ACCESS_DENIED")
-              "Access denied — the NAS share does not allow writes. " \
-              "Check that your TrueNAS SMB share and dataset ACLs grant write access to your account."
-            else
-              raw.lines.grep_v(/^$/).last&.strip || "Copy failed"
-            end
-      render json: { error: msg }, status: :unprocessable_entity
+    render json: { queued: true, transfer_id: transfer.id, nas_filename: nas_filename,
+                   renamed: nas_filename != local.basename.to_s }
+  end
+
+  # GET /nas/transfers
+  def nas_transfers
+    transfers = @current_user.nas_copy_transfers.recent.map do |t|
+      {
+        id:           t.id,
+        filename:     File.basename(t.local_path),
+        nas_filename: t.nas_filename,
+        nas_path:     t.nas_path,
+        status:       t.status,
+        error:        t.error,
+        created_at:   t.created_at.iso8601
+      }
     end
+    render json: { transfers: transfers }
   end
 
   private
@@ -517,6 +522,23 @@ class FilesController < ApplicationController
           .toast-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
           .toast-fill { height: 100%; background: #3b82f6; border-radius: 2px; transition: width 0.1s linear; width: 0%; }
 
+          /* Transfers panel */
+          .transfers-panel { position: fixed; bottom: 1.5rem; right: 1.5rem; background: #fff; border-radius: 10px; box-shadow: 0 4px 24px rgba(0,0,0,0.12); min-width: 280px; max-width: 340px; z-index: 201; border: 1px solid #e5e7eb; }
+          .transfers-panel[hidden] { display: none; }
+          .transfers-header { display: flex; align-items: center; padding: 0.6rem 0.875rem; border-bottom: 1px solid #f3f4f6; gap: 0.4rem; }
+          .transfers-header span { font-size: 0.78rem; font-weight: 600; color: #374151; flex: 1; }
+          .transfers-close { background: none; border: none; cursor: pointer; font-size: 0.82rem; color: #9ca3af; padding: 0; line-height: 1; }
+          .transfers-close:hover { color: #374151; }
+          .transfer-item { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.55rem 0.875rem; border-bottom: 1px solid #f9fafb; }
+          .transfer-item:last-child { border-bottom: none; }
+          .transfer-icon { font-size: 0.9rem; flex-shrink: 0; margin-top: 0.05rem; }
+          .transfer-info { flex: 1; min-width: 0; }
+          .transfer-name { font-size: 0.78rem; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .transfer-sub { font-size: 0.69rem; color: #9ca3af; margin-top: 0.1rem; }
+          .transfer-sub.error { color: #dc2626; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+          .spinner { display: inline-block; animation: spin 1s linear infinite; }
+
           /* File grid */
           .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.875rem; }
 
@@ -609,6 +631,15 @@ class FilesController < ApplicationController
         <div class="toast" id="toast">
           <p id="toastText">Uploading&hellip;</p>
           <div class="toast-bar"><div class="toast-fill" id="toastFill"></div></div>
+        </div>
+
+        <!-- NAS Transfers panel -->
+        <div class="transfers-panel" id="transfersPanel" hidden>
+          <div class="transfers-header">
+            <span>&#128427; NAS Transfers</span>
+            <button class="transfers-close" onclick="dismissTransfers()">&#10005;</button>
+          </div>
+          <div id="transfersList"></div>
         </div>
 
         <!-- Background context menu -->
@@ -1313,7 +1344,7 @@ class FilesController < ApplicationController
           async function confirmNasCopy() {
             if (!nasCopySource) return;
             const btn = document.getElementById('nasCopyConfirmBtn');
-            btn.textContent = 'Copying\u2026'; btn.disabled = true;
+            btn.textContent = 'Queuing\u2026'; btn.disabled = true;
             try {
               const r = await fetch('/nas/copy', {
                 method: 'POST',
@@ -1321,19 +1352,71 @@ class FilesController < ApplicationController
                 body: JSON.stringify({ local_path: nasCopySource, nas_path: nasCopyDest })
               });
               const d = await r.json();
-              if (r.ok) {
+              if (r.ok && d.queued) {
                 closeModal('nasCopyModal');
-                const origName = nasCopySource.split('/').pop();
-                const msg = d.renamed
-                  ? `\u2705 Copied to NAS as "${d.nas_filename}" (renamed from "${origName}" — colons and other Windows-invalid characters were replaced with underscores).`
-                  : `\u2705 "${origName}" copied to NAS successfully.`;
-                alert(msg);
+                startTransferPolling();
               } else {
-                alert('Error: ' + (d.error || 'Copy failed'));
+                alert('Error: ' + (d.error || 'Failed to queue copy'));
               }
             } finally {
               btn.textContent = 'Copy Here'; btn.disabled = false;
             }
+          }
+
+          // ── NAS Transfers panel ───────────────────────────────────────────────
+          let transferPollTimer = null;
+
+          function startTransferPolling() {
+            document.getElementById('transfersPanel').removeAttribute('hidden');
+            pollTransfers();
+          }
+
+          function dismissTransfers() {
+            document.getElementById('transfersPanel').setAttribute('hidden', '');
+            if (transferPollTimer) { clearTimeout(transferPollTimer); transferPollTimer = null; }
+          }
+
+          async function pollTransfers() {
+            transferPollTimer = null;
+            try {
+              const r = await fetch('/nas/transfers');
+              if (!r.ok) return;
+              const d = await r.json();
+              renderTransfers(d.transfers || []);
+              const hasActive = (d.transfers || []).some(t => t.status === 'queued');
+              if (hasActive) {
+                transferPollTimer = setTimeout(pollTransfers, 3000);
+              }
+            } catch (e) {
+              // network error — retry
+              transferPollTimer = setTimeout(pollTransfers, 5000);
+            }
+          }
+
+          function renderTransfers(transfers) {
+            if (!transfers.length) {
+              document.getElementById('transfersPanel').setAttribute('hidden', '');
+              return;
+            }
+            const html = transfers.map(t => {
+              const icon = t.status === 'done' ? '\u2705'
+                         : t.status === 'failed' ? '\u274c'
+                         : '<span class="spinner">\u23f3</span>';
+              const dest = t.nas_path ? t.nas_path + '/' + t.nas_filename : t.nas_filename;
+              const sub = t.status === 'failed'
+                ? `<div class="transfer-sub error">${esc(t.error || 'Failed')}</div>`
+                : t.status === 'done'
+                  ? `<div class="transfer-sub">\u2192 ${esc(dest || '')}</div>`
+                  : `<div class="transfer-sub">Copying\u2026</div>`;
+              return `<div class="transfer-item">
+                <div class="transfer-icon">${icon}</div>
+                <div class="transfer-info">
+                  <div class="transfer-name">${esc(t.filename)}</div>
+                  ${sub}
+                </div>
+              </div>`;
+            }).join('');
+            document.getElementById('transfersList').innerHTML = html;
           }
 
           // Enter key for NAS credentials form

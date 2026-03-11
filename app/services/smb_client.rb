@@ -22,10 +22,10 @@ module SmbClient
   # Copy a local file to the share. remote_path is the destination directory
   # within the share (slash-separated, empty = root). nas_filename overrides
   # the remote filename (use to sanitize Windows-invalid characters).
-  def self.put(share:, local_path:, remote_path:, username:, password:, nas_filename: nil)
+  def self.put(share:, local_path:, remote_path:, username:, password:, nas_filename: nil, timeout: SMB_TIMEOUT)
     remote_file = nas_filename || File.basename(local_path)
     cd_part     = remote_path.blank? ? "" : "cd \"#{smb_path(remote_path)}\"; "
-    run(share: share, username: username, password: password,
+    run(share: share, username: username, password: password, timeout: timeout,
         command: "#{cd_part}put \"#{local_path}\" \"#{remote_file}\"")
   end
 
@@ -53,12 +53,12 @@ module SmbClient
     run(share: share, username: username, password: password, command: "ls *")
   end
 
-  def self.run(share:, username:, password:, command:)
+  def self.run(share:, username:, password:, command:, timeout: SMB_TIMEOUT)
     stdout = stderr = ""
     exit_status = nil
 
     with_auth_file(username, password) do |auth_file|
-      Timeout.timeout(SMB_TIMEOUT) do
+      Timeout.timeout(timeout) do
         stdout, stderr, exit_status = Open3.capture3(
           "smbclient", "//#{SMB_HOST}/#{share}", "-A", auth_file,
           "--option=client min protocol=SMB2",
@@ -72,7 +72,7 @@ module SmbClient
     combined_error = [ stderr, stdout ].map(&:strip).reject(&:empty?).join("\n")
     { success: exit_status&.success?, output: stdout, error: combined_error }
   rescue Timeout::Error
-    { success: false, output: "", error: "Connection timed out after #{SMB_TIMEOUT}s" }
+    { success: false, output: "", error: "Connection timed out after #{timeout}s" }
   rescue => e
     { success: false, output: "", error: e.message }
   end

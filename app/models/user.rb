@@ -1,6 +1,7 @@
 class User < ApplicationRecord
   has_secure_password
   has_many :api_tokens, dependent: :destroy
+  has_many :nas_copy_transfers, dependent: :destroy
 
   USERNAME_FORMAT = /\A[a-z0-9]([a-z0-9\-]*[a-z0-9])?\z/
 
