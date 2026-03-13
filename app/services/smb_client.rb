@@ -12,7 +12,7 @@ module SmbClient
   # List a directory on the share.
   # path is a slash-separated relative path within the share (empty = root).
   def self.list(share:, path:, username:, password:)
-    smb_path = path.blank? ? "*" : smb_path(path) + "\\*"
+    smb_path = path.blank? ? "*" : "\"#{smb_path(path)}\\*\""
     result = run(share: share, username: username, password: password,
                  command: "ls #{smb_path}")
     return result unless result[:success]

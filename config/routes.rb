@@ -13,6 +13,7 @@ Rails.application.routes.draw do
   scope "/__fh" do
     get    "/logout",        to: "files#logout"
     get    "/",              to: "files#index"
+    get    "/list",          to: "files#list"
     post   "/upload",        to: "files#upload"
     post   "/mkdir",         to: "files#mkdir"
     post   "/move",          to: "files#move"
