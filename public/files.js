@@ -16,6 +16,11 @@ async function readJsonResponse(response) {
 }
 const IMAGE_EXTS = new Set(['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif']);
 function isImage(name) { return IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
+function imagePreviewUrl(ws, itemPath) {
+  return ws.type === 'nas'
+    ? '/nas/download/' + encodeURIComponent(itemPath) + '?account_id=' + encodeURIComponent(ws.accountId || '') + '&inline=1'
+    : '/download/' + encodeURIComponent(itemPath);
+}
 function fileBadge(name) {
   const ext = (name.split('.').pop() || '').toLowerCase();
   const m = { pdf:['#dc2626','PDF'], doc:['#2563eb','DOC'], docx:['#2563eb','DOC'],
@@ -353,8 +358,8 @@ function createTile(winId, item, idx, currentPath) {
   let preview;
   if (item.type === 'dir') {
     preview = '<span class="folder-icon">&#128193;</span>';
-  } else if (ws.type === 'local' && isImage(item.name)) {
-    preview = `<img src="/download/${encodeURIComponent(itemPath)}" alt="${esc(item.name)}" loading="lazy">`;
+  } else if (isImage(item.name)) {
+    preview = `<img class="tile-thumb" src="${imagePreviewUrl(ws, itemPath)}" alt="${esc(item.name)}" loading="lazy">`;
   } else {
     preview = fileBadge(item.name);
   }

@@ -232,8 +232,9 @@ class FilesController < ApplicationController
     end
 
     data = File.binread(tf.path)
+    mime_type = Marcel::MimeType.for(Pathname.new(tf.path), name: filename)
     tf.unlink
-    send_data data, filename: filename, disposition: "attachment"
+    send_data data, filename: filename, disposition: download_disposition, type: mime_type
   end
 
   # POST /nas/copy-from-nas  body: { nas_path:, local_path: (dest dir, optional) }
@@ -446,6 +447,10 @@ class FilesController < ApplicationController
 
     render json: { error: "Source NAS account not found" }, status: :not_found
     nil
+  end
+
+  def download_disposition
+    params[:inline].present? ? "inline" : "attachment"
   end
 
   # ── Auth ────────────────────────────────────────────────────────────────────

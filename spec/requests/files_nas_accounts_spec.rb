@@ -1,3 +1,4 @@
+require "base64"
 require "rails_helper"
 
 RSpec.describe "Files NAS accounts", type: :request do
@@ -173,6 +174,28 @@ RSpec.describe "Files NAS accounts", type: :request do
         "nas_filename" => "quarterly.csv",
         "account" => include("id" => destination_account.id, "username" => "beta-user")
       )
+    end
+  end
+
+  describe "GET /__fh/nas/download/*path" do
+    let!(:account) { create(:nas_account, user: user, username: "alpha-user", plain_password: "alpha-pass") }
+
+    it "supports inline image previews for NAS thumbnails" do
+      png_data = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+iNh0AAAAASUVORK5CYII=")
+
+      expect(SmbClient).to receive(:get)
+        .with(share: "alpha-user", remote_path: "photos/cat.png", local_path: kind_of(String), username: "alpha-user", password: "alpha-pass") do |args|
+          File.binwrite(args[:local_path], png_data)
+          { success: true }
+        end
+
+      get "/__fh/nas/download/photos/cat.png",
+          params: { account_id: account.id, inline: 1 },
+          headers: browser_headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response.media_type).to eq("image/png")
+      expect(response.headers["Content-Disposition"]).to include("inline")
     end
   end
 end
