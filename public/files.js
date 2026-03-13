@@ -363,9 +363,10 @@ function createTile(winId, item, idx, currentPath) {
   } else {
     preview = fileBadge(item.name);
   }
+  const sizeLabel = item.type === 'dir' ? '' : humanizeBytes(item.size);
   div.innerHTML = `<div class="tile-preview">${preview}</div>
     <div class="tile-info"><div class="tile-name" title="${esc(item.name)}">${esc(item.name)}</div>
-    <div class="tile-size">${humanizeBytes(item.size)}</div></div>`;
+    ${sizeLabel ? `<div class="tile-size">${sizeLabel}</div>` : ''}</div>`;
 
   div.addEventListener('click',     e => handleTileClick(e, div, winId));
   div.addEventListener('dblclick',  () => handleTileDblClick(div, winId));
