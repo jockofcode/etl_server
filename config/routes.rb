@@ -25,6 +25,9 @@ Rails.application.routes.draw do
     # NAS (SMB) integration
     get  "/nas/status",           to: "files#nas_status"
     put  "/nas/credentials",      to: "files#nas_credentials"
+    post "/nas/accounts",         to: "files#nas_account_create"
+    patch "/nas/accounts/:id",    to: "files#nas_account_update"
+    delete "/nas/accounts/:id",   to: "files#nas_account_destroy"
     get  "/nas/browse",           to: "files#nas_browse"
     post "/nas/copy",             to: "files#nas_copy"
     get  "/nas/download/*path",   to: "files#nas_download",      format: false

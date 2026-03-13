@@ -31,14 +31,14 @@ module SmbClient
 
   # Download a file from the share to a local path.
   # remote_path is slash-separated relative path to the file within the share.
-  def self.get(share:, remote_path:, local_path:, username:, password:)
+  def self.get(share:, remote_path:, local_path:, username:, password:, timeout: SMB_TIMEOUT)
     remote_dir  = File.dirname(remote_path).gsub("/", "\\")
     remote_file = File.basename(remote_path)
     local_dir   = File.dirname(local_path)
     local_file  = File.basename(local_path)
 
     cd_part = (remote_dir == "." || remote_dir.empty?) ? "" : "cd \"#{remote_dir}\"; "
-    run(share: share, username: username, password: password,
+    run(share: share, username: username, password: password, timeout: timeout,
         command: "#{cd_part}lcd \"#{local_dir}\"; get \"#{remote_file}\" \"#{local_file}\"")
   end
 

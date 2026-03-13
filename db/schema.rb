@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_11_000002) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_13_000002) do
   create_table "api_tokens", force: :cascade do |t|
     t.integer "user_id", null: false
     t.string "token", null: false
@@ -22,6 +22,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_11_000002) do
     t.index ["user_id"], name: "index_api_tokens_on_user_id"
   end
 
+  create_table "nas_accounts", force: :cascade do |t|
+    t.integer "user_id", null: false
+    t.string "username", null: false
+    t.text "password_ciphertext", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["user_id", "username"], name: "index_nas_accounts_on_user_id_and_username", unique: true
+  end
+
   create_table "nas_copy_transfers", force: :cascade do |t|
     t.integer "user_id", null: false
     t.string "local_path", null: false
@@ -31,6 +40,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_11_000002) do
     t.text "error"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "nas_account_id"
+    t.integer "source_nas_account_id"
+    t.string "source_nas_path"
+    t.index ["nas_account_id"], name: "index_nas_copy_transfers_on_nas_account_id"
+    t.index ["source_nas_account_id"], name: "index_nas_copy_transfers_on_source_nas_account_id"
     t.index ["user_id", "created_at"], name: "index_nas_copy_transfers_on_user_id_and_created_at"
   end
 
@@ -48,4 +62,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_11_000002) do
   end
 
   add_foreign_key "api_tokens", "users"
+  add_foreign_key "nas_accounts", "users"
+  add_foreign_key "nas_copy_transfers", "nas_accounts"
+  add_foreign_key "nas_copy_transfers", "nas_accounts", column: "source_nas_account_id"
 end

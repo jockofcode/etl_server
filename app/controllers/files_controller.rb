@@ -123,43 +123,82 @@ class FilesController < ApplicationController
 
   # GET /nas/status
   def nas_status
-    render json: { connected: @current_user.smb_connected?,
-                   username:  @current_user.smb_username }
+    sync_legacy_nas_account!
+    render json: serialized_nas_status
   end
 
   # PUT /nas/credentials  body: { username:, password: }
   def nas_credentials
-    username = params[:username].to_s.strip.downcase
-    password = params[:password].to_s
+    sync_legacy_nas_account!
+    username = normalized_nas_username
+    password = nas_password
     return render json: { error: "Username required" }, status: :bad_request if username.blank?
     return render json: { error: "Password required" }, status: :bad_request if password.blank?
+    return unless test_nas_credentials(username, password)
 
-    result = SmbClient.test(share: username, username: username, password: password)
-    unless result[:success]
-      msg = result[:error].to_s.lines.grep_v(/^$/).last&.strip || "Connection failed"
-      return render json: { error: "Could not connect: #{msg}" }, status: :unprocessable_entity
-    end
+    account = @current_user.nas_accounts.find_or_initialize_by(username: username)
+    account.password = password
+    return render_nas_account_validation_error(account) unless account.save
 
-    @current_user.smb_username = username
-    @current_user.smb_password = password
-    @current_user.save!
-    render json: { ok: true, username: username }
+    render json: { ok: true, account: serialize_nas_account(account) }.merge(serialized_nas_status)
+  end
+
+  # POST /nas/accounts  body: { username:, password: }
+  def nas_account_create
+    sync_legacy_nas_account!
+    username = normalized_nas_username
+    password = nas_password
+
+    return render json: { error: "Username required" }, status: :bad_request if username.blank?
+    return render json: { error: "Password required" }, status: :bad_request if password.blank?
+    return render json: { error: "NAS account already linked" }, status: :conflict if @current_user.nas_accounts.exists?(username: username)
+    return unless test_nas_credentials(username, password)
+
+    account = @current_user.nas_accounts.new(username: username, password: password)
+    return render_nas_account_validation_error(account) unless account.save
+
+    render json: { ok: true, account: serialize_nas_account(account) }.merge(serialized_nas_status), status: :created
+  end
+
+  # PATCH /nas/accounts/:id  body: { password: }
+  def nas_account_update
+    account = find_managed_nas_account
+    return if performed?
+
+    password = nas_password
+    return render json: { error: "Password required" }, status: :bad_request if password.blank?
+    return unless test_nas_credentials(account.username, password)
+
+    account.password = password
+    return render_nas_account_validation_error(account) unless account.save
+
+    render json: { ok: true, account: serialize_nas_account(account) }.merge(serialized_nas_status)
+  end
+
+  # DELETE /nas/accounts/:id
+  def nas_account_destroy
+    account = find_managed_nas_account
+    return if performed?
+
+    account.destroy!
+    render json: { ok: true }.merge(serialized_nas_status)
   end
 
   # GET /nas/browse?path=
   def nas_browse
-    return render json: { error: "NAS not configured" }, status: :unauthorized unless @current_user.smb_connected?
+    account = selected_nas_account
+    return if performed?
 
     path   = params[:path].to_s.strip
     result = SmbClient.list(
-      share:    @current_user.smb_username,
+      share:    account.username,
       path:     path,
-      username: @current_user.smb_username,
-      password: @current_user.smb_password
+      username: account.username,
+      password: account.password
     )
 
     if result[:success]
-      render json: { items: result[:items], path: path }
+      render json: { items: result[:items], path: path, account: serialize_nas_account(account) }
     else
       msg = result[:error].to_s.lines.grep_v(/^$/).last&.strip || "Browse failed"
       render json: { error: msg }, status: :unprocessable_entity
@@ -168,7 +207,8 @@ class FilesController < ApplicationController
 
   # GET /nas/download/*path — proxy a NAS file to the browser
   def nas_download
-    return head(:unauthorized) unless @current_user.smb_connected?
+    account = selected_nas_account
+    return if performed?
 
     nas_path = params[:path].to_s.strip
     return head(:bad_request) if nas_path.blank? || nas_path =~ /["\\\x00]/
@@ -178,11 +218,11 @@ class FilesController < ApplicationController
     tf.close
 
     result = SmbClient.get(
-      share:       @current_user.smb_username,
+      share:       account.username,
       remote_path: nas_path,
       local_path:  tf.path,
-      username:    @current_user.smb_username,
-      password:    @current_user.smb_password
+      username:    account.username,
+      password:    account.password
     )
 
     unless result[:success]
@@ -198,7 +238,8 @@ class FilesController < ApplicationController
 
   # POST /nas/copy-from-nas  body: { nas_path:, local_path: (dest dir, optional) }
   def nas_copy_from_nas
-    return render json: { error: "NAS not configured" }, status: :unauthorized unless @current_user.smb_connected?
+    account = selected_nas_account
+    return if performed?
 
     nas_path = params[:nas_path].to_s.strip
     return render json: { error: "Invalid NAS path" }, status: :bad_request if nas_path.blank? || nas_path =~ /["\\\x00]/
@@ -211,11 +252,11 @@ class FilesController < ApplicationController
     local_path = dest_dir.join(filename)
 
     result = SmbClient.get(
-      share:       @current_user.smb_username,
+      share:       account.username,
       remote_path: nas_path,
       local_path:  local_path.to_s,
-      username:    @current_user.smb_username,
-      password:    @current_user.smb_password
+      username:    account.username,
+      password:    account.password
     )
 
     if result[:success]
@@ -228,17 +269,18 @@ class FilesController < ApplicationController
 
   # POST /nas/mkdir  body: { path: "folder/sub" }
   def nas_mkdir
-    return render json: { error: "NAS not configured" }, status: :unauthorized unless @current_user.smb_connected?
+    account = selected_nas_account
+    return if performed?
 
     path = params[:path].to_s.strip
     return render json: { error: "Path required" }, status: :bad_request if path.blank?
     return render json: { error: "Invalid path" }, status: :bad_request if path =~ /["\\\x00]/
 
     result = SmbClient.mkdir(
-      share:    @current_user.smb_username,
+      share:    account.username,
       path:     path,
-      username: @current_user.smb_username,
-      password: @current_user.smb_password
+      username: account.username,
+      password: account.password
     )
 
     if result[:success]
@@ -251,37 +293,62 @@ class FilesController < ApplicationController
 
   # POST /nas/copy  body: { local_path:, nas_path: }
   def nas_copy
-    return render json: { error: "NAS not configured" }, status: :unauthorized unless @current_user.smb_connected?
+    account = selected_nas_account
+    return if performed?
 
-    local  = safe_user_path(params[:local_path].to_s)
-    return render json: { error: "Invalid local path" }, status: :bad_request unless local&.file?
+    source_nas_account = nil
+    source_nas_path = nil
+
+    if params[:source_account_id].present? || params[:source_nas_path].present?
+      source_nas_account = selected_source_nas_account
+      return if performed?
+
+      source_nas_path = params[:source_nas_path].to_s.strip
+      return render json: { error: "Invalid source NAS path" }, status: :bad_request if source_nas_path.blank? || source_nas_path =~ /["\\\x00]/
+
+      source_path = source_nas_path
+      source_filename = File.basename(source_nas_path)
+    else
+      local = safe_user_path(params[:local_path].to_s)
+      return render json: { error: "Invalid local path" }, status: :bad_request unless local&.file?
+
+      source_path = local.to_s
+      source_filename = local.basename.to_s
+    end
 
     nas_path = params[:nas_path].to_s.strip
     return render json: { error: "Invalid NAS path" }, status: :bad_request if nas_path =~ /["\\\x00]/
 
     # Windows/NTFS forbids: \ / : * ? " < > | — replace with underscores so the
     # upload doesn't get NT_STATUS_ACCESS_DENIED for characters like ':' in timestamps.
-    nas_filename = local.basename.to_s.gsub(/[\\\/:\*\?"<>|]/, "_")
+    nas_filename = source_filename.gsub(/[\\\/:\*\?"<>|]/, "_")
 
     transfer = NasCopyTransfer.create!(
-      user:         @current_user,
-      local_path:   local.to_s,
-      nas_path:     nas_path,
-      nas_filename: nas_filename,
-      status:       "queued"
+      user:               @current_user,
+      nas_account:        account,
+      source_nas_account: source_nas_account,
+      source_nas_path:    source_nas_path,
+      local_path:         source_path,
+      nas_path:           nas_path,
+      nas_filename:       nas_filename,
+      status:             "queued"
     )
     NasCopyJob.perform_later(transfer.id)
 
     render json: { queued: true, transfer_id: transfer.id, nas_filename: nas_filename,
-                   renamed: nas_filename != local.basename.to_s }
+                   renamed: nas_filename != source_filename,
+                   account: serialize_nas_account(account) }
   end
 
   # GET /nas/transfers
   def nas_transfers
+    sync_legacy_nas_account!
     transfers = @current_user.nas_copy_transfers.recent.map do |t|
       {
         id:           t.id,
-        filename:     File.basename(t.local_path),
+        account_id:   t.nas_account_id,
+        account_username: t.nas_account&.username,
+        filename:     File.basename(t.source_path),
         nas_filename: t.nas_filename,
         nas_path:     t.nas_path,
         status:       t.status,
@@ -293,6 +360,93 @@ class FilesController < ApplicationController
   end
 
   private
+
+  def normalized_nas_username
+    params[:username].to_s.strip.downcase
+  end
+
+  def nas_password
+    params[:password].to_s
+  end
+
+  def test_nas_credentials(username, password)
+    result = SmbClient.test(share: username, username: username, password: password)
+    return true if result[:success]
+
+    msg = result[:error].to_s.lines.grep_v(/^$/).last&.strip || "Connection failed"
+    render json: { error: "Could not connect: #{msg}" }, status: :unprocessable_entity
+    false
+  end
+
+  def sync_legacy_nas_account!
+    return unless @current_user.smb_connected?
+
+    username = @current_user.smb_username.to_s.strip.downcase
+    return if username.blank? || @current_user.nas_accounts.exists?(username: username)
+
+    @current_user.nas_accounts.create(
+      username: username,
+      password_ciphertext: @current_user.smb_password_ciphertext
+    )
+  end
+
+  def render_nas_account_validation_error(account)
+    render json: {
+      error: account.errors.full_messages.to_sentence.presence || "Invalid NAS account"
+    }, status: :unprocessable_entity
+  end
+
+  def serialized_nas_status
+    accounts = @current_user.nas_accounts.order(:username).to_a
+    {
+      connected: accounts.any?,
+      username: accounts.first&.username,
+      accounts: accounts.map { |account| serialize_nas_account(account) }
+    }
+  end
+
+  def serialize_nas_account(account)
+    { id: account.id, username: account.username }
+  end
+
+  def find_managed_nas_account
+    sync_legacy_nas_account!
+    account = @current_user.nas_accounts.find_by(id: params[:id])
+    return account if account
+
+    render json: { error: "NAS account not found" }, status: :not_found
+    nil
+  end
+
+  def selected_nas_account
+    sync_legacy_nas_account!
+    accounts = @current_user.nas_accounts.order(:username)
+    account_id = params[:account_id].presence
+
+    if account_id.blank?
+      return accounts.first if accounts.one?
+      return render(json: { error: "NAS not configured" }, status: :unauthorized) if accounts.none?
+      return render(json: { error: "NAS account required" }, status: :bad_request)
+    end
+
+    account = accounts.find_by(id: account_id)
+    return account if account
+
+    render json: { error: "NAS account not found" }, status: :not_found
+    nil
+  end
+
+  def selected_source_nas_account
+    sync_legacy_nas_account!
+    source_account_id = params[:source_account_id].presence
+    return render(json: { error: "Source NAS account required" }, status: :bad_request) if source_account_id.blank?
+
+    account = @current_user.nas_accounts.find_by(id: source_account_id)
+    return account if account
+
+    render json: { error: "Source NAS account not found" }, status: :not_found
+    nil
+  end
 
   # ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -405,6 +559,8 @@ class FilesController < ApplicationController
 
   def render_desktop_page
     username = CGI.escapeHTML(@current_user.username.to_s)
+    css = File.read(Rails.root.join("public", "files.css")).gsub("</style", "<\\/style")
+    js  = File.read(Rails.root.join("public", "files.js")).gsub("</script", "<\\/script")
     <<~HTML
       <!DOCTYPE html>
       <html lang="en">
@@ -413,7 +569,9 @@ class FilesController < ApplicationController
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Files &mdash; #{username}</title>
         <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F4C1;</text></svg>">
-        <link rel="stylesheet" href="/files.css">
+        <style>
+#{css}
+        </style>
       </head>
       <body>
         <aside id="sidebar">
@@ -423,12 +581,14 @@ class FilesController < ApplicationController
             <button class="sidebar-item" id="homeBtn" onclick="openOrFocusWindow('local','','Home')">
               <span class="sb-icon">&#127968;</span><span>Home</span>
             </button>
+            <div id="homeSidebarWindows" class="sidebar-sublist"></div>
           </div>
           <div class="sb-spacer"></div>
           <div class="sb-section-label">NAS</div>
-          <button class="sidebar-item" id="nasConnectBtn" onclick="openNasCredentials()">
-            <span class="sb-icon">&#128268;</span><span>Connect NAS</span>
+          <button class="sidebar-item" id="nasManageBtn" onclick="openNasManager()">
+            <span class="sb-icon">&#9881;</span><span>Manage NAS Accounts</span>
           </button>
+          <div id="nasSidebarAccounts" class="sidebar-sublist"></div>
           <a href="/logout" class="sidebar-item" style="color:#f87171;text-decoration:none">
             <span class="sb-icon">&#10148;</span><span>Logout</span>
           </a>
@@ -479,12 +639,27 @@ class FilesController < ApplicationController
             </div>
           </div>
         </div>
+        <!-- NAS accounts manager modal -->
+        <div class="overlay" id="nasManageModal" hidden>
+          <div class="modal" style="max-width:560px">
+            <h3>&#128421; Manage NAS Accounts</h3>
+            <p style="font-size:.82rem;color:#6b7280;margin-bottom:.75rem">
+              Link multiple NAS shares, update passwords for existing accounts, or remove linked accounts.
+            </p>
+            <div class="account-list" id="nasAccountsList"></div>
+            <p class="field-error" id="nasManageError" hidden></p>
+            <div class="modal-actions">
+              <button class="btn btn-secondary" onclick="closeModal('nasManageModal')">Close</button>
+              <button class="btn btn-primary" onclick="openNasCredentials()">Add Account</button>
+            </div>
+          </div>
+        </div>
         <!-- NAS credentials modal -->
         <div class="overlay" id="nasCredModal" hidden>
           <div class="modal">
-            <h3 id="nasCredTitle">&#128427; Connect to NAS</h3>
+            <h3 id="nasCredTitle">&#128427; Link NAS Account</h3>
             <p id="nasCredDesc" style="font-size:.82rem;color:#6b7280;margin-bottom:.75rem">
-              Enter your TrueNAS username (your first name) and password to link your NAS share.
+              Enter a TrueNAS username and password to link an additional NAS account.
             </p>
             <label id="nasUsernameLabel">Username</label>
             <input type="text" id="nasUsernameInput" placeholder="e.g. kalob" autocomplete="off" spellcheck="false">
@@ -502,6 +677,8 @@ class FilesController < ApplicationController
           <div class="modal" style="max-width:500px">
             <h3 id="nasCopyTitle">Copy to NAS</h3>
             <p style="font-size:.8rem;color:#6b7280;margin-bottom:.4rem">Choose a destination folder on the NAS:</p>
+            <label for="nasCopyAccountSelect">NAS account</label>
+            <select id="nasCopyAccountSelect" onchange="changeNasCopyAccount(this.value)"></select>
             <div class="dir-list" id="nasCopyDirList"><div class="dir-list-loading">Loading&hellip;</div></div>
             <div style="display:flex;align-items:center;gap:.4rem;padding:.4rem .1rem 0">
               <input type="text" id="nasCopyNewFolder" placeholder="New folder name&hellip;" style="flex:1;font-size:.78rem;padding:.28rem .55rem;border:1px solid #d1d5db;border-radius:5px;outline:none">
@@ -528,7 +705,9 @@ class FilesController < ApplicationController
           <div id="transfersList"></div>
         </div>
 
-        <script src="/files.js"></script>
+        <script>
+#{js}
+        </script>
       </body>
       </html>
     HTML

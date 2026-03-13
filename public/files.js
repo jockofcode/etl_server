@@ -8,6 +8,12 @@ function humanizeBytes(b) {
   const e = Math.min(Math.floor(Math.log(b) / Math.log(1024)), u.length - 1);
   return (b / Math.pow(1024, e)).toFixed(1) + '\u202f' + u[e];
 }
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try { return JSON.parse(text); }
+  catch { return { error: text || `Request failed (${response.status})` }; }
+}
 const IMAGE_EXTS = new Set(['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif']);
 function isImage(name) { return IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function fileBadge(name) {
@@ -40,17 +46,71 @@ const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 function genWinId() { return 'w' + (++winSeq); }
 
-function openOrFocusWindow(type, path, title) {
-  for (const [id, ws] of windows) {
-    if (ws.type === type) { focusWindow(id); if (path !== ws.path) loadWindow(id, path); return; }
-  }
-  openWindow(type, path, title);
+function getWindowFrame(el) {
+  const rect = el.getBoundingClientRect();
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
 }
 
-function openWindow(type, path, title) {
+function applyWindowFrame(el, frame) {
+  el.style.left = frame.left + 'px';
+  el.style.top = frame.top + 'px';
+  el.style.width = frame.width + 'px';
+  el.style.height = frame.height + 'px';
+}
+
+function getMaximisedFrame() {
+  const rect = document.getElementById('desktop').getBoundingClientRect();
+  const margin = 12;
+  return {
+    left: rect.left + margin,
+    top: rect.top + margin,
+    width: Math.max(420, rect.width - margin * 2),
+    height: Math.max(260, rect.height - margin * 2)
+  };
+}
+
+function restoreWindowFromMinimised(ws) {
+  if (!ws?.minimized) return;
+  ws.minimized = false;
+  ws.el.classList.remove('win-minimized');
+}
+
+function clampWindowSize(left, top, width, height) {
+  return {
+    width: Math.max(380, Math.min(width, window.innerWidth - left - 8)),
+    height: Math.max(260, Math.min(height, window.innerHeight - top - 8))
+  };
+}
+
+function windowMatches(ws, type, options = {}) {
+  if (ws.type !== type) return false;
+  if (type !== 'nas') return true;
+  return String(ws.accountId || '') === String(options.accountId || '');
+}
+
+function openOrFocusWindow(type, path, title, options = {}) {
+  for (const [id, ws] of windows) {
+    if (windowMatches(ws, type, options)) {
+      restoreWindowFromMinimised(ws);
+      focusWindow(id);
+      if (path !== ws.path) loadWindow(id, path);
+      return;
+    }
+  }
+  openWindow(type, path, title, options);
+}
+
+function openWindow(type, path, title, options = {}) {
   const id   = genWinId();
   const icon = type === 'nas' ? '🖥' : '🏠';
-  const ws   = { id, type, path, title, el: null, selectedPaths: new Set(), lastSelected: null };
+  const ws   = {
+    id, type, path, title, el: null,
+    accountId: options.accountId || null,
+    accountName: options.accountName || title,
+    sidebarItemId: options.sidebarItemId || (type === 'local' ? 'homeBtn' : null),
+    selectedPaths: new Set(), lastSelected: null,
+    minimized: false, maximized: false, restoreFrame: null
+  };
   windows.set(id, ws);
 
   const el = document.createElement('div');
@@ -63,8 +123,8 @@ function openWindow(type, path, title) {
     <div class="win-bar" onmousedown="startWinDrag(event,'${id}')">
       <div class="win-controls">
         <button class="win-btn win-close"  onclick="closeWindow('${id}')" title="Close"></button>
-        <button class="win-btn win-min"    title="Minimise"></button>
-        <button class="win-btn win-max"    title="Maximise"></button>
+        <button class="win-btn win-min"    onclick="toggleWindowMinimise(event,'${id}')" title="Minimise"></button>
+        <button class="win-btn win-max"    onclick="toggleWindowMaximise(event,'${id}')" title="Maximise"></button>
       </div>
       <span class="win-title" id="${id}-title">${esc(title)}</span>
       <span class="win-icon" style="width:18px">${icon}</span>
@@ -81,14 +141,50 @@ function openWindow(type, path, title) {
          ondragleave="winDragLeave(event,'${id}')"
          oncontextmenu="winContextMenu(event,'${id}')">
       <div class="win-loading">Loading\u2026</div>
-    </div>`;
+    </div>
+    <div class="win-resize-handle" onmousedown="startWinResize(event,'${id}')" aria-hidden="true"></div>`;
 
   ws.el = el;
   el.addEventListener('mousedown', () => focusWindow(id));
   document.getElementById('desktop').appendChild(el);
+  renderHomeSidebarWindows();
   focusWindow(id);
   loadWindow(id, path);
   return id;
+}
+
+function homeSidebarWindowBtnId(winId) {
+  return 'homeSidebarWin-' + winId;
+}
+
+function focusSidebarWindow(winId) {
+  const ws = windows.get(winId);
+  if (!ws) return;
+
+  restoreWindowFromMinimised(ws);
+  focusWindow(winId);
+}
+
+function renderHomeSidebarWindows() {
+  const container = document.getElementById('homeSidebarWindows');
+  if (!container) return;
+
+  const openNasWindows = Array.from(windows.values()).filter(ws => ws.type === 'nas');
+  container.innerHTML = openNasWindows.map(ws =>
+    '<button class="sidebar-item sidebar-subitem" id="' + homeSidebarWindowBtnId(ws.id) +
+    '" onclick="focusSidebarWindow(\'' + esc(ws.id) + '\')">' +
+    '<span class="sb-icon">&#128421;</span><span>' + esc(ws.accountName || ws.title || 'NAS') + '</span></button>'
+  ).join('');
+
+  updateSidebarHighlight();
+}
+
+function updateSidebarHighlight() {
+  document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('sb-active'));
+  if (!activeWinId) return;
+  const ws = windows.get(activeWinId);
+  document.getElementById(ws?.sidebarItemId || 'homeBtn')?.classList.add('sb-active');
+  document.getElementById(homeSidebarWindowBtnId(activeWinId))?.classList.add('sb-active');
 }
 
 function focusWindow(id) {
@@ -97,24 +193,53 @@ function focusWindow(id) {
   windows.get(id).el.style.zIndex = topZ;
   for (const [wid, w] of windows) w.el.classList.toggle('win-focused', wid === id);
   activeWinId = id;
-  // Highlight sidebar item
-  document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('sb-active'));
-  const ws = windows.get(id);
-  document.getElementById(ws.type === 'nas' ? 'nasSidebarBtn' : 'homeBtn')?.classList.add('sb-active');
+  updateSidebarHighlight();
 }
 
 function closeWindow(id) {
   windows.get(id)?.el.remove();
   windows.delete(id);
-  if (activeWinId === id) { activeWinId = null; document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('sb-active')); }
+  if (activeWinId === id) activeWinId = null;
+  renderHomeSidebarWindows();
+}
+
+function toggleWindowMinimise(event, id) {
+  event?.stopPropagation();
+  const ws = windows.get(id);
+  if (!ws) return;
+  ws.minimized = !ws.minimized;
+  ws.el.classList.toggle('win-minimized', ws.minimized);
+  if (!ws.minimized) focusWindow(id);
+}
+
+function toggleWindowMaximise(event, id) {
+  event?.stopPropagation();
+  const ws = windows.get(id);
+  if (!ws) return;
+
+  restoreWindowFromMinimised(ws);
+
+  if (ws.maximized) {
+    if (ws.restoreFrame) applyWindowFrame(ws.el, ws.restoreFrame);
+    ws.maximized = false;
+    ws.restoreFrame = null;
+  } else {
+    ws.restoreFrame = getWindowFrame(ws.el);
+    applyWindowFrame(ws.el, getMaximisedFrame());
+    ws.maximized = true;
+  }
+
+  focusWindow(id);
 }
 
 // ── Window title-bar drag ────────────────────────────────────────────────────
 let winDragState = null;
 function startWinDrag(e, id) {
   if (e.target.closest('.win-controls') || e.target.tagName === 'INPUT') return;
+  const ws = windows.get(id);
+  if (!ws || ws.maximized) return;
   focusWindow(id);
-  const rect = windows.get(id).el.getBoundingClientRect();
+  const rect = ws.el.getBoundingClientRect();
   winDragState = { id, sx: e.clientX, sy: e.clientY, ol: rect.left, ot: rect.top };
   document.addEventListener('mousemove', onWinDrag);
   document.addEventListener('mouseup', stopWinDrag, { once: true });
@@ -128,6 +253,44 @@ function onWinDrag(e) {
 }
 function stopWinDrag() { winDragState = null; document.removeEventListener('mousemove', onWinDrag); }
 
+let winResizeState = null;
+function startWinResize(e, id) {
+  const ws = windows.get(id);
+  if (!ws || ws.maximized || ws.minimized) return;
+  focusWindow(id);
+  const rect = ws.el.getBoundingClientRect();
+  winResizeState = { id, sx: e.clientX, sy: e.clientY, left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+  document.addEventListener('mousemove', onWinResize);
+  document.addEventListener('mouseup', stopWinResize, { once: true });
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+function onWinResize(e) {
+  if (!winResizeState) return;
+  const ws = windows.get(winResizeState.id);
+  if (!ws) return;
+  const next = clampWindowSize(
+    winResizeState.left,
+    winResizeState.top,
+    winResizeState.width + e.clientX - winResizeState.sx,
+    winResizeState.height + e.clientY - winResizeState.sy
+  );
+  ws.el.style.width = next.width + 'px';
+  ws.el.style.height = next.height + 'px';
+}
+
+function stopWinResize() {
+  winResizeState = null;
+  document.removeEventListener('mousemove', onWinResize);
+}
+
+window.addEventListener('resize', () => {
+  for (const [, ws] of windows) {
+    if (ws.maximized) applyWindowFrame(ws.el, getMaximisedFrame());
+  }
+});
+
 // ── Content loading ──────────────────────────────────────────────────────────
 async function loadWindow(id, path) {
   const ws = windows.get(id);
@@ -138,7 +301,7 @@ async function loadWindow(id, path) {
   try {
     const url = ws.type === 'local'
       ? '/list?path=' + encodeURIComponent(path)
-      : '/nas/browse?path=' + encodeURIComponent(path);
+      : '/nas/browse?account_id=' + encodeURIComponent(ws.accountId || '') + '&path=' + encodeURIComponent(path);
     const r = await fetch(url);
     const d = await r.json();
     if (!r.ok) { body.innerHTML = `<div class="win-error">${esc(d.error || 'Error')}</div>`; return; }
@@ -165,7 +328,7 @@ function renderWindowContent(id, items, path) {
 function renderWinNav(id, path) {
   const ws  = windows.get(id);
   const nav = document.getElementById(id + '-nav');
-  const rootLabel = ws.type === 'nas' ? (nasUsername || 'NAS') : 'Home';
+  const rootLabel = ws.type === 'nas' ? (ws.accountName || 'NAS') : 'Home';
   let html = `<span class="nav-crumb" onclick="loadWindow('${id}','')">` + esc(rootLabel) + '</span>';
   const parts = path.split('/').filter(Boolean);
   parts.forEach((p, i) => {
@@ -174,7 +337,7 @@ function renderWinNav(id, path) {
   });
   nav.innerHTML = html;
   const titleEl = document.getElementById(id + '-title');
-  if (titleEl) titleEl.textContent = parts.length ? parts[parts.length - 1] : (ws.type === 'nas' ? (nasUsername || 'NAS') : 'Home');
+  if (titleEl) titleEl.textContent = parts.length ? parts[parts.length - 1] : (ws.type === 'nas' ? (ws.accountName || 'NAS') : 'Home');
 }
 
 // ── Tile creation ────────────────────────────────────────────────────────────
@@ -249,7 +412,7 @@ function tileDragStart(e, tile, winId) {
   const ws = windows.get(winId);
   e.dataTransfer.effectAllowed = 'copy';
   e.dataTransfer.setData('application/x-etl-file', JSON.stringify({
-    winId, winType: ws.type, path: tile.dataset.path, name: tile.dataset.name
+    winId, winType: ws.type, path: tile.dataset.path, name: tile.dataset.name, accountId: ws.accountId || null
   }));
 }
 
@@ -278,15 +441,23 @@ async function handleInternalDrop(src, destWinId) {
   const dest = windows.get(destWinId);
   if (!dest) return;
   if (src.winType === 'local' && dest.type === 'nas') {
-    if (!nasConnected) { alert('Connect to NAS first.'); return; }
+    if (!dest.accountId) { alert('Choose a NAS account first.'); return; }
     const r = await fetch('/nas/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ local_path: src.path, nas_path: dest.path }) });
-    if (r.ok) startTransferPolling();
-    else { const d = await r.json(); alert('Error: ' + (d.error || 'Copy failed')); }
+      body: JSON.stringify({ account_id: dest.accountId, local_path: src.path, nas_path: dest.path }) });
+    const d = await readJsonResponse(r);
+    if (r.ok && d.queued) startTransferPolling();
+    else alert('Error: ' + (d.error || 'Copy failed'));
+  } else if (src.winType === 'nas' && dest.type === 'nas') {
+    if (!src.accountId || !dest.accountId) { alert('Choose a NAS account first.'); return; }
+    const r = await fetch('/nas/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: dest.accountId, source_account_id: src.accountId, source_nas_path: src.path, nas_path: dest.path }) });
+    const d = await readJsonResponse(r);
+    if (r.ok && d.queued) startTransferPolling();
+    else alert('Error: ' + (d.error || 'Copy failed'));
   } else if (src.winType === 'nas' && dest.type === 'local') {
     const r = await fetch('/nas/copy-from-nas', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nas_path: src.path, local_path: dest.path }) });
-    const d = await r.json();
+      body: JSON.stringify({ account_id: src.accountId, nas_path: src.path, local_path: dest.path }) });
+    const d = await readJsonResponse(r);
     if (r.ok) loadWindow(destWinId, dest.path);
     else alert('Error: ' + (d.error || 'Copy failed'));
   } else if (src.winType === 'local' && dest.type === 'local') {
@@ -341,7 +512,9 @@ function ctxDownload() {
   if (!ctxTargetTile) return;
   const ws = windows.get(ctxWinId);
   const a = document.createElement('a');
-  a.href     = (ws?.type === 'nas' ? '/nas/download/' : '/download/') + encodeURIComponent(ctxTargetTile.dataset.path);
+  a.href     = ws?.type === 'nas'
+    ? '/nas/download/' + encodeURIComponent(ctxTargetTile.dataset.path) + '?account_id=' + encodeURIComponent(ws.accountId || '')
+    : '/download/' + encodeURIComponent(ctxTargetTile.dataset.path);
   a.download = ctxTargetTile.dataset.name;
   document.body.appendChild(a); a.click(); a.remove();
 }
@@ -366,8 +539,9 @@ function ctxNasCopy() {
   if (!fp.length) return;
   nasCopySource = fp[0];
   document.getElementById('nasCopyTitle').textContent = 'Copy \u201c' + nasCopySource.split('/').pop() + '\u201d to NAS';
-  if (!nasConnected) { alert('Connect to NAS first.'); return; }
-  loadNasCopyDirs('');
+  if (!nasAccounts.length) { alert('Link a NAS account first.'); return; }
+  populateNasCopyAccountOptions();
+  changeNasCopyAccount(nasCopyAccountId || String(nasAccounts[0].id));
   document.getElementById('nasCopyModal').removeAttribute('hidden');
 }
 function bgCtxNewFolder() { hideCtx(); openWinCreateDir(ctxWinId); }
@@ -411,7 +585,8 @@ function confirmCreateDir() {
   if (!ws) return;
   const fullPath = ws.path ? ws.path + '/' + name : name;
   const url = ws.type === 'nas' ? '/nas/mkdir' : '/mkdir';
-  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: fullPath }) })
+  const payload = ws.type === 'nas' ? { account_id: ws.accountId, path: fullPath } : { path: fullPath };
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(r => { if (r.ok) { closeModal('createDirModal'); loadWindow(activeCreateDirWinId, ws.path); } else r.json().then(d => alert(d.error || 'Error')); });
 }
 
@@ -487,7 +662,7 @@ document.addEventListener('keydown', e => {
   if (e.target.matches('input,textarea')) return;
   if (e.key === 'Escape') {
     hideCtx();
-    ['infoModal','createDirModal','moveModal','nasCredModal','nasCopyModal'].forEach(closeModal);
+    ['infoModal','createDirModal','moveModal','nasManageModal','nasCredModal','nasCopyModal'].forEach(closeModal);
   }
   if ((e.key === 'Delete' || e.key === 'Backspace') && activeWinId) {
     const ws = windows.get(activeWinId);
@@ -501,43 +676,123 @@ document.addEventListener('keydown', e => {
 });
 
 // ── NAS ──────────────────────────────────────────────────────────────────────
-let nasConnected = false, nasUsername = '', nasCopySource = null, nasCopyDest = '';
+let nasAccounts = [], nasCopySource = null, nasCopyDest = '', nasCopyAccountId = '', nasEditingAccountId = null;
 
-fetch('/nas/status').then(r => r.json()).then(d => {
-  nasConnected = d.connected; nasUsername = d.username || ''; updateNasSidebar();
-}).catch(() => {});
-
-function updateNasSidebar() {
-  const existing = document.getElementById('nasSidebarBtn');
-  const locs     = document.getElementById('sidebarLocations');
-  if (nasConnected && nasUsername) {
-    if (existing) { existing.querySelector('.nas-label').textContent = nasUsername; }
-    else {
-      const btn = document.createElement('button');
-      btn.className = 'sidebar-item'; btn.id = 'nasSidebarBtn';
-      btn.onclick = () => openOrFocusWindow('nas', '', nasUsername);
-      btn.innerHTML = '<span class="sb-icon">&#128421;</span><span class="nas-label">' + esc(nasUsername) + '</span>';
-      locs.appendChild(btn);
-    }
-    document.getElementById('nasConnectBtn').innerHTML = '<span class="sb-icon">&#9881;</span><span>NAS Settings</span>';
-  } else {
-    existing?.remove();
-    document.getElementById('nasConnectBtn').innerHTML = '<span class="sb-icon">&#128268;</span><span>Connect NAS</span>';
-  }
+function setNasAccounts(accounts) {
+  nasAccounts = (accounts || []).map(account => ({ id: String(account.id), username: account.username }));
 }
 
-function openNasCredentials() {
-  const changing = nasConnected && nasUsername;
-  document.getElementById('nasCredTitle').textContent = changing ? '\uD83D\uDDAB Change NAS Password' : '\uD83D\uDDAB Connect to NAS';
+function getNasAccount(accountId) {
+  return nasAccounts.find(account => String(account.id) === String(accountId)) || null;
+}
+
+function nasSidebarBtnId(accountId) {
+  return 'nasSidebarBtn-' + accountId;
+}
+
+async function refreshNasAccounts() {
+  const r = await fetch('/nas/status');
+  const d = await readJsonResponse(r);
+  if (!r.ok) throw new Error(d.error || 'Could not load NAS accounts.');
+  setNasAccounts(d.accounts || []);
+  updateNasSidebar();
+  renderNasManagerList();
+  return d;
+}
+
+refreshNasAccounts().catch(() => {});
+
+function updateNasSidebar() {
+  const container = document.getElementById('nasSidebarAccounts');
+  if (!container) return;
+
+  container.innerHTML = nasAccounts.map(account =>
+    '<button class="sidebar-item sidebar-subitem" id="' + nasSidebarBtnId(account.id) +
+    '" onclick="openNasAccountWindow(\'' + esc(account.id) + '\')">' +
+    '<span class="sb-icon">&#128421;</span><span>' + esc(account.username) + '</span></button>'
+  ).join('');
+
+  for (const ws of Array.from(windows.values())) {
+    if (ws.type !== 'nas') continue;
+    const account = getNasAccount(ws.accountId);
+    if (!account) {
+      closeWindow(ws.id);
+      continue;
+    }
+    ws.accountName = account.username;
+    ws.title = account.username;
+    ws.sidebarItemId = nasSidebarBtnId(account.id);
+    renderWinNav(ws.id, ws.path);
+  }
+
+  renderHomeSidebarWindows();
+  updateSidebarHighlight();
+}
+
+function openNasAccountWindow(accountId, path = '') {
+  const account = getNasAccount(accountId);
+  if (!account) return;
+
+  openOrFocusWindow('nas', path, account.username, {
+    accountId: account.id,
+    accountName: account.username,
+    sidebarItemId: nasSidebarBtnId(account.id)
+  });
+}
+
+function showNasManageError(message) {
+  const errEl = document.getElementById('nasManageError');
+  errEl.textContent = message;
+  errEl.hidden = !message;
+}
+
+function renderNasManagerList() {
+  const list = document.getElementById('nasAccountsList');
+  if (!list) return;
+
+  if (!nasAccounts.length) {
+    list.innerHTML = '<div class="account-empty">No NAS accounts linked yet.</div>';
+    return;
+  }
+
+  list.innerHTML = nasAccounts.map(account =>
+    '<div class="account-row">' +
+      '<div class="account-meta">' +
+        '<div class="account-name">' + esc(account.username) + '</div>' +
+        '<div class="account-sub">Linked TrueNAS share</div>' +
+      '</div>' +
+      '<div class="account-actions">' +
+        '<button class="btn btn-secondary" onclick="openNasAccountWindow(\'' + esc(account.id) + '\')">Open</button>' +
+        '<button class="btn btn-secondary" onclick="openNasCredentials(\'' + esc(account.id) + '\')">Change Password</button>' +
+        '<button class="btn btn-danger" onclick="deleteNasAccount(\'' + esc(account.id) + '\')">Delete</button>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+}
+
+function openNasManager() {
+  showNasManageError('');
+  renderNasManagerList();
+  document.getElementById('nasManageModal').removeAttribute('hidden');
+  refreshNasAccounts().catch(() => showNasManageError('Could not load NAS accounts.'));
+}
+
+function openNasCredentials(accountId = null) {
+  const account = accountId ? getNasAccount(accountId) : null;
+  const changing = Boolean(account);
+  nasEditingAccountId = account ? String(account.id) : null;
+
+  closeModal('nasManageModal');
+  document.getElementById('nasCredTitle').textContent = changing ? '🖥 Change NAS Password' : '🖥 Link NAS Account';
   document.getElementById('nasCredDesc').textContent  = changing
-    ? 'Enter a new password for your NAS account. Username is pre-filled.'
-    : 'Enter your TrueNAS username (your first name) and password to link your NAS share.';
-  document.getElementById('nasUsernameInput').value    = changing ? nasUsername : '';
+    ? 'Enter a new password for this linked NAS account. Username is read-only.'
+    : 'Enter a TrueNAS username and password to link another NAS account.';
+  document.getElementById('nasUsernameInput').value = changing ? account.username : '';
   document.getElementById('nasUsernameLabel').textContent = changing ? 'Username (read-only)' : 'Username';
   document.getElementById('nasUsernameInput').readOnly = changing;
-  document.getElementById('nasPasswordInput').value   = '';
+  document.getElementById('nasPasswordInput').value = '';
   document.getElementById('nasCredError').hidden = true;
-  document.getElementById('nasCredSaveBtn').textContent = changing ? 'Update Password' : 'Connect';
+  document.getElementById('nasCredSaveBtn').textContent = changing ? 'Update Password' : 'Link Account';
   document.getElementById('nasCredModal').removeAttribute('hidden');
   setTimeout(() => document.getElementById(changing ? 'nasPasswordInput' : 'nasUsernameInput').focus(), 50);
 }
@@ -545,54 +800,144 @@ function openNasCredentials() {
 async function saveNasCredentials() {
   const username = document.getElementById('nasUsernameInput').value.trim();
   const password = document.getElementById('nasPasswordInput').value;
-  const errEl    = document.getElementById('nasCredError');
-  const btn      = document.getElementById('nasCredSaveBtn');
+  const errEl = document.getElementById('nasCredError');
+  const btn = document.getElementById('nasCredSaveBtn');
+  const changing = Boolean(nasEditingAccountId);
+
   if (!username || !password) { errEl.textContent = 'Username and password required'; errEl.hidden = false; return; }
-  btn.textContent = 'Connecting\u2026'; btn.disabled = true;
+
+  btn.textContent = changing ? 'Saving\u2026' : 'Linking\u2026';
+  btn.disabled = true;
+
   try {
-    const r = await fetch('/nas/credentials', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }) });
-    const d = await r.json();
-    if (r.ok) { nasConnected = true; nasUsername = username; closeModal('nasCredModal'); updateNasSidebar(); openOrFocusWindow('nas', '', username); }
-    else { errEl.textContent = d.error || 'Connection failed'; errEl.hidden = false; }
-  } finally { btn.textContent = nasConnected ? 'Update Password' : 'Connect'; btn.disabled = false; }
+    const path = changing ? '/nas/accounts/' + encodeURIComponent(nasEditingAccountId) : '/nas/accounts';
+    const method = changing ? 'PATCH' : 'POST';
+    const payload = changing ? { password } : { username, password };
+    const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await readJsonResponse(r);
+
+    if (r.ok) {
+      setNasAccounts(d.accounts || []);
+      updateNasSidebar();
+      populateNasCopyAccountOptions();
+      closeModal('nasCredModal');
+      renderNasManagerList();
+      openNasManager();
+      if (!changing && d.account?.id) openNasAccountWindow(String(d.account.id));
+    } else {
+      errEl.textContent = d.error || 'Connection failed';
+      errEl.hidden = false;
+    }
+  } catch (error) {
+    errEl.textContent = error?.message || 'Connection failed';
+    errEl.hidden = false;
+  } finally {
+    btn.textContent = changing ? 'Update Password' : 'Link Account';
+    btn.disabled = false;
+  }
 }
+
+async function deleteNasAccount(accountId) {
+  const account = getNasAccount(accountId);
+  if (!account) return;
+  if (!confirm('Delete linked NAS account “' + account.username + '”?')) return;
+
+  const r = await fetch('/nas/accounts/' + encodeURIComponent(accountId), { method: 'DELETE' });
+  const d = await readJsonResponse(r);
+  if (!r.ok) {
+    showNasManageError(d.error || 'Delete failed');
+    return;
+  }
+
+  setNasAccounts(d.accounts || []);
+  if (String(nasCopyAccountId) === String(accountId)) nasCopyAccountId = nasAccounts[0]?.id || '';
+  for (const ws of Array.from(windows.values())) {
+    if (ws.type === 'nas' && String(ws.accountId) === String(accountId)) closeWindow(ws.id);
+  }
+  updateNasSidebar();
+  populateNasCopyAccountOptions();
+  renderNasManagerList();
+  showNasManageError('');
+}
+
 document.getElementById('nasPasswordInput').addEventListener('keydown', e => { if (e.key === 'Enter') saveNasCredentials(); });
 
 // ── NAS Copy modal ────────────────────────────────────────────────────────────
-async function loadNasCopyDirs(path) {
+function populateNasCopyAccountOptions() {
+  const select = document.getElementById('nasCopyAccountSelect');
+  select.innerHTML = nasAccounts.length
+    ? nasAccounts.map(account => '<option value="' + esc(account.id) + '">' + esc(account.username) + '</option>').join('')
+    : '<option value="">No NAS accounts linked</option>';
+  select.disabled = !nasAccounts.length;
+}
+
+function changeNasCopyAccount(accountId) {
+  nasCopyAccountId = String(accountId || '');
+  document.getElementById('nasCopyNewFolder').value = '';
+  if (!nasCopyAccountId) {
+    document.getElementById('nasCopyDirList').innerHTML = '<div class="dir-list-loading">Choose a NAS account.</div>';
+    return;
+  }
+  document.getElementById('nasCopyAccountSelect').value = nasCopyAccountId;
+  loadNasCopyDirs('', nasCopyAccountId);
+}
+
+async function loadNasCopyDirs(path, accountId = nasCopyAccountId) {
+  nasCopyAccountId = String(accountId || '');
   nasCopyDest = path;
-  document.getElementById('nasCopyDirList').innerHTML = '<div class="dir-list-loading">Loading\u2026</div>';
-  const r = await fetch('/nas/browse?path=' + encodeURIComponent(path));
+  const account = getNasAccount(nasCopyAccountId);
+  const list = document.getElementById('nasCopyDirList');
+
+  if (!account) {
+    list.innerHTML = '<div class="dir-list-loading">Choose a NAS account.</div>';
+    return;
+  }
+
+  list.innerHTML = '<div class="dir-list-loading">Loading\u2026</div>';
+  const r = await fetch('/nas/browse?account_id=' + encodeURIComponent(nasCopyAccountId) + '&path=' + encodeURIComponent(path));
   const d = await r.json();
-  if (!r.ok) { document.getElementById('nasCopyDirList').innerHTML = '<div class="dir-list-loading" style="color:#dc2626">' + esc(d.error || 'Error') + '</div>'; return; }
-  const dirs   = (d.items || []).filter(i => i.type === 'dir');
+  if (!r.ok) {
+    list.innerHTML = '<div class="dir-list-loading" style="color:#dc2626">' + esc(d.error || 'Error') + '</div>';
+    return;
+  }
+
+  const dirs = (d.items || []).filter(i => i.type === 'dir');
   const parent = path.split('/').filter(Boolean).slice(0, -1).join('/');
   let html = path ? `<div class="dir-item" onclick="loadNasCopyDirs('${esc(parent)}')">&#8617; Up</div>` : '';
-  html += `<div class="dir-item selected-dest">&#128194; ${esc(path || 'NAS root')} <span style="font-size:.7rem">(copy here)</span></div>`;
-  html += dirs.map(dir => { const dp = path ? path + '/' + dir.name : dir.name; return `<div class="dir-item" onclick="loadNasCopyDirs('${esc(dp)}')">&#128193; ${esc(dir.name)}</div>`; }).join('');
-  document.getElementById('nasCopyDirList').innerHTML = html;
+  html += `<div class="dir-item selected-dest">&#128421; ${esc(account.username)} / ${esc(path || 'root')} <span style="font-size:.7rem">(copy here)</span></div>`;
+  html += dirs.map(dir => {
+    const dp = path ? path + '/' + dir.name : dir.name;
+    return `<div class="dir-item" onclick="loadNasCopyDirs('${esc(dp)}')">&#128193; ${esc(dir.name)}</div>`;
+  }).join('');
+  list.innerHTML = html;
 }
+
 async function confirmNasCopy() {
-  if (!nasCopySource) return;
+  if (!nasCopySource || !nasCopyAccountId) return;
   const btn = document.getElementById('nasCopyConfirmBtn');
   btn.textContent = 'Queuing\u2026'; btn.disabled = true;
   try {
     const r = await fetch('/nas/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ local_path: nasCopySource, nas_path: nasCopyDest }) });
+      body: JSON.stringify({ account_id: nasCopyAccountId, local_path: nasCopySource, nas_path: nasCopyDest }) });
     const d = await r.json();
     if (r.ok && d.queued) { closeModal('nasCopyModal'); startTransferPolling(); }
     else alert('Error: ' + (d.error || 'Failed'));
   } finally { btn.textContent = 'Copy Here'; btn.disabled = false; }
 }
+
 async function createNasCopyFolder() {
+  if (!nasCopyAccountId) return;
   const input = document.getElementById('nasCopyNewFolder');
   const name  = input.value.trim();
   if (!name || /["\\\/\x00]/.test(name)) { alert('Invalid folder name'); return; }
   const fullPath = nasCopyDest ? nasCopyDest + '/' + name : name;
-  const r = await fetch('/nas/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: fullPath }) });
+  const r = await fetch('/nas/mkdir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account_id: nasCopyAccountId, path: fullPath })
+  });
   const d = await r.json();
-  if (d.ok) { input.value = ''; loadNasCopyDirs(fullPath); }
+  if (d.ok) { input.value = ''; loadNasCopyDirs(fullPath, nasCopyAccountId); }
   else alert('Error: ' + (d.error || 'Failed'));
 }
 
