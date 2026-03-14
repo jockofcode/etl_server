@@ -20,6 +20,7 @@ const PDF_EXTS    = new Set(['pdf']);
 function isImage(name) { return IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function isVideo(name) { return VIDEO_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function isPdf(name)   { return PDF_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
+function pdfThumbError(img) { img.parentNode.innerHTML = fileBadge(img.dataset.name); }
 function imagePreviewUrl(ws, itemPath) {
   return ws.type === 'nas'
     ? '/nas/download/' + encodeURIComponent(itemPath) + '?account_id=' + encodeURIComponent(ws.accountId || '') + '&inline=1'
@@ -373,8 +374,7 @@ function createTile(winId, item, idx, currentPath) {
     const thumbSrc = ws.type === 'nas'
       ? '/nas/thumb/' + encodeURIComponent(itemPath) + '?account_id=' + encodeURIComponent(ws.accountId || '')
       : '/thumb/' + encodeURIComponent(itemPath);
-    const badge = fileBadge(item.name);
-    preview = `<img class="tile-thumb" src="${thumbSrc}" alt="${esc(item.name)}" loading="lazy" onerror="this.parentNode.innerHTML=${JSON.stringify(badge)}">`;
+    preview = `<img class="tile-thumb" src="${thumbSrc}" alt="${esc(item.name)}" loading="lazy" data-name="${esc(item.name)}" onerror="pdfThumbError(this)">`;
   } else {
     preview = fileBadge(item.name);
   }
