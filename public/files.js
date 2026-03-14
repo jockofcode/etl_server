@@ -16,8 +16,10 @@ async function readJsonResponse(response) {
 }
 const IMAGE_EXTS = new Set(['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif']);
 const VIDEO_EXTS  = new Set(['mp4','mov','avi','mkv','webm','m4v','ogv']);
+const PDF_EXTS    = new Set(['pdf']);
 function isImage(name) { return IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function isVideo(name) { return VIDEO_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
+function isPdf(name)   { return PDF_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function imagePreviewUrl(ws, itemPath) {
   return ws.type === 'nas'
     ? '/nas/download/' + encodeURIComponent(itemPath) + '?account_id=' + encodeURIComponent(ws.accountId || '') + '&inline=1'
@@ -414,11 +416,12 @@ function handleTileDblClick(tile, winId) {
   const ws   = windows.get(winId);
   if (isImage(name)) { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'image'); return; }
   if (isVideo(name)) { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'video'); return; }
+  if (isPdf(name))   { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'pdf');   return; }
 }
 
 function openMediaWindow(name, url, mediaType) {
   const id     = genWinId();
-  const icon   = mediaType === 'video' ? '&#127916;' : '&#128444;';
+  const icon   = mediaType === 'video' ? '&#127916;' : mediaType === 'pdf' ? '&#128196;' : '&#128444;';
   const ws     = { id, type: mediaType, path: url, title: name, el: null, sidebarItemId: null, minimized: false, maximized: false, restoreFrame: null };
   windows.set(id, ws);
 
@@ -426,11 +429,13 @@ function openMediaWindow(name, url, mediaType) {
   el.className = 'win';
   el.id        = id;
   const offset = (winSeq - 1) % 9;
-  const [w, h] = mediaType === 'video' ? [760, 500] : [680, 540];
+  const [w, h] = mediaType === 'video' ? [760, 500] : mediaType === 'pdf' ? [680, 860] : [680, 540];
   el.style.cssText = `left:${200 + offset * 26}px;top:${20 + offset * 24}px;width:${w}px;height:${h}px;z-index:${++topZ}`;
 
   const body = mediaType === 'video'
     ? `<video src="${esc(url)}" controls autoplay style="width:100%;height:100%;display:block;background:#000"></video>`
+    : mediaType === 'pdf'
+    ? `<embed src="${esc(url)}" type="application/pdf" style="width:100%;height:100%;display:block">`
     : `<img src="${esc(url)}" alt="${esc(name)}" style="max-width:100%;max-height:100%;object-fit:contain;display:block">`;
 
   el.innerHTML = `
