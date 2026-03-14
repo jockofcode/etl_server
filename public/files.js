@@ -426,14 +426,15 @@ function handleTileDblClick(tile, winId) {
   if (tile.dataset.type === 'dir') { loadWindow(winId, tile.dataset.path); return; }
   const name = tile.dataset.name;
   const ws   = windows.get(winId);
-  if (isImage(name)) { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'image'); return; }
-  if (isVideo(name)) { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'video'); return; }
-  if (isPdf(name))   { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'pdf');   return; }
+  if (isImage(name))       { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'image'); return; }
+  if (isVideo(name))       { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'video'); return; }
+  if (isPdf(name))         { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'pdf');   return; }
+  if (isTextPreview(name)) { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'text');  return; }
 }
 
 function openMediaWindow(name, url, mediaType) {
   const id     = genWinId();
-  const icon   = mediaType === 'video' ? '&#127916;' : mediaType === 'pdf' ? '&#128196;' : '&#128444;';
+  const icon   = mediaType === 'video' ? '&#127916;' : mediaType === 'pdf' ? '&#128196;' : mediaType === 'text' ? '&#128221;' : '&#128444;';
   const ws     = { id, type: mediaType, path: url, title: name, el: null, sidebarItemId: null, minimized: false, maximized: false, restoreFrame: null };
   windows.set(id, ws);
 
@@ -441,13 +442,16 @@ function openMediaWindow(name, url, mediaType) {
   el.className = 'win';
   el.id        = id;
   const offset = (winSeq - 1) % 9;
-  const [w, h] = mediaType === 'video' ? [760, 500] : mediaType === 'pdf' ? [680, 860] : [680, 540];
+  const [w, h] = mediaType === 'video' ? [760, 500] : mediaType === 'pdf' ? [680, 860] : mediaType === 'text' ? [740, 560] : [680, 540];
   el.style.cssText = `left:${200 + offset * 26}px;top:${20 + offset * 24}px;width:${w}px;height:${h}px;z-index:${++topZ}`;
 
+  const bodyClass = mediaType === 'text' ? 'text-win-body' : 'media-win-body';
   const body = mediaType === 'video'
     ? `<video src="${esc(url)}" controls autoplay style="width:100%;height:100%;display:block;background:#000"></video>`
     : mediaType === 'pdf'
     ? `<embed src="${esc(url)}" type="application/pdf" style="width:100%;height:100%;display:block">`
+    : mediaType === 'text'
+    ? `<pre id="${id}-pre">Loading\u2026</pre>`
     : `<img src="${esc(url)}" alt="${esc(name)}" style="max-width:100%;max-height:100%;object-fit:contain;display:block">`;
 
   el.innerHTML = `
@@ -460,13 +464,20 @@ function openMediaWindow(name, url, mediaType) {
       <span class="win-title" id="${id}-title">${esc(name)}</span>
       <span class="win-icon" style="width:18px">${icon}</span>
     </div>
-    <div class="win-body media-win-body" id="${id}-body">${body}</div>
+    <div class="win-body ${bodyClass}" id="${id}-body">${body}</div>
     <div class="win-resize-handle" onmousedown="startWinResize(event,'${id}')" aria-hidden="true"></div>`;
 
   ws.el = el;
   el.addEventListener('mousedown', () => focusWindow(id));
   document.getElementById('desktop').appendChild(el);
   focusWindow(id);
+
+  if (mediaType === 'text') {
+    fetch(url)
+      .then(r => r.text())
+      .then(t => { const pre = document.getElementById(id + '-pre'); if (pre) pre.textContent = t; })
+      .catch(() => { const pre = document.getElementById(id + '-pre'); if (pre) pre.textContent = 'Failed to load file.'; });
+  }
 }
 
 function clearWinSel(winId) {
