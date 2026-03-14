@@ -34,6 +34,9 @@ Rails.application.routes.draw do
     post "/nas/copy-from-nas",    to: "files#nas_copy_from_nas"
     post "/nas/mkdir",            to: "files#nas_mkdir"
     get  "/nas/transfers",        to: "files#nas_transfers"
+
+    # User settings
+    patch "/settings/password",   to: "files#settings_password"
   end
 
   namespace :auth do

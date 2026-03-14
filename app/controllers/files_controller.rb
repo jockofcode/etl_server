@@ -113,6 +113,32 @@ class FilesController < ApplicationController
     render json: { ok: true }
   end
 
+  # ── Settings actions ───────────────────────────────────────────────────────
+
+  # PATCH /settings/password
+  def settings_password
+    current_password = params[:current_password].to_s
+    new_password     = params[:new_password].to_s
+
+    if current_password.blank? || new_password.blank?
+      return render json: { error: "Current and new passwords are required" }, status: :unprocessable_entity
+    end
+
+    unless @current_user.authenticate(current_password)
+      return render json: { error: "Current password is incorrect" }, status: :unprocessable_entity
+    end
+
+    if new_password.length < 8
+      return render json: { error: "New password must be at least 8 characters" }, status: :unprocessable_entity
+    end
+
+    if @current_user.update(password: new_password)
+      render json: { ok: true }
+    else
+      render json: { error: @current_user.errors.full_messages.first }, status: :unprocessable_entity
+    end
+  end
+
   # ── NAS (SMB) actions ──────────────────────────────────────────────────────
 
   # GET /logout
@@ -594,6 +620,9 @@ class FilesController < ApplicationController
             <span class="sb-icon">&#9881;</span><span>Manage NAS Accounts</span>
           </button>
           <div id="nasSidebarAccounts" class="sidebar-sublist"></div>
+          <button class="sidebar-item" onclick="openPasswordModal()">
+            <span class="sb-icon">&#128274;</span><span>Change Password</span>
+          </button>
           <a href="/logout" class="sidebar-item" style="color:#f87171;text-decoration:none">
             <span class="sb-icon">&#10148;</span><span>Logout</span>
           </a>
@@ -692,6 +721,24 @@ class FilesController < ApplicationController
             <div class="modal-actions">
               <button class="btn btn-secondary" onclick="closeModal('nasCopyModal')">Cancel</button>
               <button class="btn btn-primary" id="nasCopyConfirmBtn" onclick="confirmNasCopy()">Copy Here</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Change password modal -->
+        <div class="overlay" id="changePasswordModal" hidden>
+          <div class="modal">
+            <h3>&#128274; Change Password</h3>
+            <label>Current Password</label>
+            <input type="password" id="currentPasswordInput" placeholder="Current password" autocomplete="current-password">
+            <label>New Password</label>
+            <input type="password" id="newPasswordInput" placeholder="New password (min 8 characters)" autocomplete="new-password">
+            <label>Confirm New Password</label>
+            <input type="password" id="confirmPasswordInput" placeholder="Confirm new password" autocomplete="new-password">
+            <p class="field-error" id="passwordChangeError" hidden></p>
+            <div class="modal-actions">
+              <button class="btn btn-secondary" onclick="closeModal('changePasswordModal')">Cancel</button>
+              <button class="btn btn-primary" id="changePasswordBtn" onclick="savePasswordChange()">Update Password</button>
             </div>
           </div>
         </div>

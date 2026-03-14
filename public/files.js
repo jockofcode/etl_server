@@ -976,5 +976,64 @@ function renderTransfers(transfers) {
   document.getElementById('transfersList').innerHTML = html;
 }
 
+// ── Password change modal ─────────────────────────────────────────────────────
+function openPasswordModal() {
+  document.getElementById('currentPasswordInput').value = '';
+  document.getElementById('newPasswordInput').value = '';
+  document.getElementById('confirmPasswordInput').value = '';
+  const errEl = document.getElementById('passwordChangeError');
+  errEl.hidden = true;
+  const btn = document.getElementById('changePasswordBtn');
+  btn.textContent = 'Update Password';
+  btn.disabled = false;
+  document.getElementById('changePasswordModal').removeAttribute('hidden');
+  setTimeout(() => document.getElementById('currentPasswordInput').focus(), 50);
+}
+async function savePasswordChange() {
+  const current = document.getElementById('currentPasswordInput').value;
+  const newPw   = document.getElementById('newPasswordInput').value;
+  const confirm = document.getElementById('confirmPasswordInput').value;
+  const errEl   = document.getElementById('passwordChangeError');
+  const btn     = document.getElementById('changePasswordBtn');
+  errEl.hidden  = true;
+  if (!current || !newPw || !confirm) {
+    errEl.textContent = 'All fields are required'; errEl.hidden = false; return;
+  }
+  if (newPw !== confirm) {
+    errEl.textContent = 'New passwords do not match'; errEl.hidden = false; return;
+  }
+  if (newPw.length < 8) {
+    errEl.textContent = 'New password must be at least 8 characters'; errEl.hidden = false; return;
+  }
+  btn.textContent = 'Saving\u2026';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/settings/password', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: current, new_password: newPw })
+    });
+    const d = await readJsonResponse(r);
+    if (r.ok) {
+      closeModal('changePasswordModal');
+    } else {
+      errEl.textContent = d.error || 'Failed to update password';
+      errEl.hidden = false;
+    }
+  } catch (err) {
+    errEl.textContent = err?.message || 'Failed to update password';
+    errEl.hidden = false;
+  } finally {
+    btn.textContent = 'Update Password';
+    btn.disabled = false;
+  }
+}
+['currentPasswordInput', 'newPasswordInput', 'confirmPasswordInput'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') savePasswordChange();
+    if (e.key === 'Escape') closeModal('changePasswordModal');
+  });
+});
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 openWindow('local', '', 'Home');
