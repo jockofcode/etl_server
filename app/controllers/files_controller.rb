@@ -184,7 +184,7 @@ class FilesController < ApplicationController
 
   # GET /logout
   def logout
-    cookies.delete(:_etl_browser_uid, domain: ".cnxkit.com")
+    cookies.delete(:_etl_browser_uid, domain: ".cnxkit.com", path: "/")
     redirect_to "https://etl.cnxkit.com/", allow_other_host: true
   end
 
@@ -391,6 +391,37 @@ class FilesController < ApplicationController
   end
 
   # POST /nas/mkdir  body: { path: "folder/sub" }
+  # POST /nas/upload  body: multipart file + account_id + path
+  def nas_upload
+    account = selected_nas_account
+    return if performed?
+
+    file = params[:file]
+    return render json: { error: "No file provided" }, status: :bad_request unless file
+
+    filename = File.basename(file.original_filename.to_s.tr("\\", "/"))
+    return render json: { error: "Invalid filename" }, status: :bad_request if filename.blank?
+
+    dest_path = params[:path].to_s.strip
+
+    result = SmbClient.put(
+      share:        account.username,
+      local_path:   file.tempfile.path,
+      remote_path:  dest_path,
+      username:     account.username,
+      password:     account.password,
+      nas_filename: filename,
+      timeout:      120
+    )
+
+    if result[:success]
+      render json: { ok: true }
+    else
+      msg = result[:error].to_s.lines.grep_v(/^$/).last&.strip || "Upload failed"
+      render json: { error: msg }, status: :unprocessable_entity
+    end
+  end
+
   def nas_mkdir
     account = selected_nas_account
     return if performed?

@@ -652,7 +652,7 @@ const toast = document.getElementById('toast'), toastText = document.getElementB
 function winUpload(winId, input) { if (input.files.length) winUploadFiles(winId, Array.from(input.files)); input.value = ''; }
 function winUploadFiles(winId, files) {
   const ws = windows.get(winId);
-  if (!ws || ws.type !== 'local') return;
+  if (!ws || (ws.type !== 'local' && ws.type !== 'nas')) return;
   let i = 0;
   toast.classList.add('visible');
   function next() {
@@ -663,7 +663,13 @@ function winUploadFiles(winId, files) {
     const form = new FormData();
     form.append('file', file);
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/upload?path=' + encodeURIComponent(ws.path));
+    if (ws.type === 'nas') {
+      form.append('account_id', ws.accountId || '');
+      form.append('path', ws.path);
+      xhr.open('POST', '/nas/upload');
+    } else {
+      xhr.open('POST', '/upload?path=' + encodeURIComponent(ws.path));
+    }
     xhr.upload.onprogress = ev => { if (ev.lengthComputable) toastFill.style.width = (ev.loaded / ev.total * 100) + '%'; };
     xhr.onloadend = () => { i++; next(); };
     xhr.send(form);
