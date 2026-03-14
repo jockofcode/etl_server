@@ -292,6 +292,53 @@ class FilesController < ApplicationController
     send_data data, filename: filename, disposition: download_disposition, type: mime_type
   end
 
+  # GET /nas/thumb/*path?account_id= — first-page JPEG thumbnail for a NAS PDF (cached)
+  def nas_thumb
+    account = selected_nas_account
+    return if performed?
+
+    nas_path = params[:path].to_s.strip
+    return head(:bad_request)             if nas_path.blank? || nas_path =~ /["\\\x00]/
+    return head(:unsupported_media_type)  unless File.extname(nas_path).downcase == ".pdf"
+
+    cache_dir = Rails.root.join("storage", "thumbs", "nas", @current_user.username.to_s)
+    FileUtils.mkdir_p(cache_dir)
+    cache_key  = Digest::SHA256.hexdigest("#{account.id}:#{nas_path}")
+    cache_path = cache_dir.join("#{cache_key}.jpg")
+
+    unless cache_path.exist?
+      tf = Tempfile.new(["nas_pdf", ".pdf"])
+      tf.close
+
+      result = SmbClient.get(
+        share:       account.username,
+        remote_path: nas_path,
+        local_path:  tf.path,
+        username:    account.username,
+        password:    account.password
+      )
+
+      unless result[:success]
+        tf.unlink
+        return head(:unprocessable_entity)
+      end
+
+      prefix = cache_dir.join(cache_key).to_s
+      _, _, status = Open3.capture3(
+        "pdftoppm", "-r", "108", "-f", "1", "-l", "1", "-jpeg", "-jpegopt", "quality=82",
+        tf.path, prefix
+      )
+      tf.unlink
+
+      generated = Dir["#{prefix}*.jpg"].min
+      return head(:unprocessable_entity) unless status.success? && generated && File.exist?(generated)
+
+      FileUtils.mv(generated, cache_path.to_s)
+    end
+
+    send_file cache_path.to_s, type: "image/jpeg", disposition: "inline"
+  end
+
   # POST /nas/copy-from-nas  body: { nas_path:, local_path: (dest dir, optional) }
   def nas_copy_from_nas
     account = selected_nas_account
