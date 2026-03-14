@@ -389,11 +389,31 @@ function createTile(winId, item, idx, currentPath) {
     <div class="tile-info"><div class="tile-name" title="${esc(item.name)}">${esc(item.name)}</div>
     ${sizeLabel ? `<div class="tile-size">${sizeLabel}</div>` : ''}</div>`;
 
-  div.addEventListener('click',     e => handleTileClick(e, div, winId));
-  div.addEventListener('dblclick',  () => handleTileDblClick(div, winId));
-  div.addEventListener('dragstart', e => tileDragStart(e, div, winId));
-  div.addEventListener('dragend',   () => document.querySelectorAll('.win-body.drop-target').forEach(b => b.classList.remove('drop-target')));
+  div.addEventListener('click',      e => handleTileClick(e, div, winId));
+  div.addEventListener('dblclick',   () => handleTileDblClick(div, winId));
+  div.addEventListener('mouseenter', () => tileTooltipSchedule(div));
+  div.addEventListener('mouseleave', tileTooltipCancel);
+  div.addEventListener('dragstart',  e => tileDragStart(e, div, winId));
+  div.addEventListener('dragend',    () => document.querySelectorAll('.win-body.drop-target').forEach(b => b.classList.remove('drop-target')));
   return div;
+}
+
+// ── Tile tooltip ─────────────────────────────────────────────────────────────
+let tileTooltipTimer = null;
+function tileTooltipSchedule(tile) {
+  tileTooltipCancel();
+  tileTooltipTimer = setTimeout(() => {
+    const tt   = document.getElementById('tileTooltip');
+    const rect = tile.getBoundingClientRect();
+    tt.textContent = tile.dataset.name;
+    tt.style.left  = (rect.left + rect.width / 2) + 'px';
+    tt.style.top   = (rect.bottom + 6) + 'px';
+    tt.removeAttribute('hidden');
+  }, 3000);
+}
+function tileTooltipCancel() {
+  if (tileTooltipTimer) { clearTimeout(tileTooltipTimer); tileTooltipTimer = null; }
+  document.getElementById('tileTooltip').setAttribute('hidden', '');
 }
 
 // ── Tile interaction ─────────────────────────────────────────────────────────

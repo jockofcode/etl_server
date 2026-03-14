@@ -857,6 +857,9 @@ class FilesController < ApplicationController
           </div>
         </div>
 
+        <!-- Tile tooltip -->
+        <div id="tileTooltip" hidden></div>
+
         <!-- Upload toast -->
         <div class="toast" id="toast">
           <p id="toastText">Uploading&hellip;</p>
