@@ -102,7 +102,7 @@ class FilesController < ApplicationController
   def download
     path = safe_user_path(params[:path].to_s)
     return head(:not_found) unless path&.exist? && path.file?
-    send_file path.to_s, disposition: "attachment"
+    send_file path.to_s, disposition: download_disposition
   end
 
   # DELETE /delete/*path

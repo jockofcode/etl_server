@@ -15,11 +15,18 @@ async function readJsonResponse(response) {
   catch { return { error: text || `Request failed (${response.status})` }; }
 }
 const IMAGE_EXTS = new Set(['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif']);
+const VIDEO_EXTS  = new Set(['mp4','mov','avi','mkv','webm','m4v','ogv']);
 function isImage(name) { return IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
+function isVideo(name) { return VIDEO_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function imagePreviewUrl(ws, itemPath) {
   return ws.type === 'nas'
     ? '/nas/download/' + encodeURIComponent(itemPath) + '?account_id=' + encodeURIComponent(ws.accountId || '') + '&inline=1'
     : '/download/' + encodeURIComponent(itemPath);
+}
+function mediaUrl(ws, itemPath) {
+  return ws.type === 'nas'
+    ? '/nas/download/' + encodeURIComponent(itemPath) + '?account_id=' + encodeURIComponent(ws.accountId || '') + '&inline=1'
+    : '/download/' + encodeURIComponent(itemPath) + '?inline=1';
 }
 function fileBadge(name) {
   const ext = (name.split('.').pop() || '').toLowerCase();
@@ -402,7 +409,47 @@ function handleTileClick(e, tile, winId) {
 
 function handleTileDblClick(tile, winId) {
   focusWindow(winId);
-  if (tile.dataset.type === 'dir') loadWindow(winId, tile.dataset.path);
+  if (tile.dataset.type === 'dir') { loadWindow(winId, tile.dataset.path); return; }
+  const name = tile.dataset.name;
+  const ws   = windows.get(winId);
+  if (isImage(name)) { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'image'); return; }
+  if (isVideo(name)) { openMediaWindow(name, mediaUrl(ws, tile.dataset.path), 'video'); return; }
+}
+
+function openMediaWindow(name, url, mediaType) {
+  const id     = genWinId();
+  const icon   = mediaType === 'video' ? '&#127916;' : '&#128444;';
+  const ws     = { id, type: mediaType, path: url, title: name, el: null, sidebarItemId: null, minimized: false, maximized: false, restoreFrame: null };
+  windows.set(id, ws);
+
+  const el     = document.createElement('div');
+  el.className = 'win';
+  el.id        = id;
+  const offset = (winSeq - 1) % 9;
+  const [w, h] = mediaType === 'video' ? [760, 500] : [680, 540];
+  el.style.cssText = `left:${200 + offset * 26}px;top:${20 + offset * 24}px;width:${w}px;height:${h}px;z-index:${++topZ}`;
+
+  const body = mediaType === 'video'
+    ? `<video src="${esc(url)}" controls autoplay style="width:100%;height:100%;display:block;background:#000"></video>`
+    : `<img src="${esc(url)}" alt="${esc(name)}" style="max-width:100%;max-height:100%;object-fit:contain;display:block">`;
+
+  el.innerHTML = `
+    <div class="win-bar" onmousedown="startWinDrag(event,'${id}')">
+      <div class="win-controls">
+        <button class="win-btn win-close" onclick="closeWindow('${id}')" title="Close"></button>
+        <button class="win-btn win-min"   onclick="toggleWindowMinimise(event,'${id}')" title="Minimise"></button>
+        <button class="win-btn win-max"   onclick="toggleWindowMaximise(event,'${id}')" title="Maximise"></button>
+      </div>
+      <span class="win-title" id="${id}-title">${esc(name)}</span>
+      <span class="win-icon" style="width:18px">${icon}</span>
+    </div>
+    <div class="win-body media-win-body" id="${id}-body">${body}</div>
+    <div class="win-resize-handle" onmousedown="startWinResize(event,'${id}')" aria-hidden="true"></div>`;
+
+  ws.el = el;
+  el.addEventListener('mousedown', () => focusWindow(id));
+  document.getElementById('desktop').appendChild(el);
+  focusWindow(id);
 }
 
 function clearWinSel(winId) {

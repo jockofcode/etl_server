@@ -52,6 +52,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .win-resize-handle { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 5; }
 .win-resize-handle::before { content: ''; position: absolute; right: 4px; bottom: 4px; width: 10px; height: 10px; border-right: 2px solid #94a3b8; border-bottom: 2px solid #94a3b8; opacity: 0.9; }
 .win-loading, .win-empty { text-align: center; padding: 2.5rem; color: #9ca3af; font-size: 0.82rem; }
+.media-win-body { display: flex; align-items: center; justify-content: center; background: #111; padding: 0; overflow: hidden; }
 .win-error { text-align: center; padding: 2rem; color: #dc2626; font-size: 0.82rem; }
 
 /* ── File grid ───────────────────────────────────────────────────────────── */
