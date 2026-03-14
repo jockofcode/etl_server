@@ -485,20 +485,21 @@ class FilesController < ApplicationController
   private
 
   def generate_text_thumb(source_path, dest_path)
-    lines = File.readlines(source_path, encoding: "utf-8:binary", invalid: :replace, undef: :replace)
-                .first(60)
-                .map { |l| l.rstrip[0, 95] }
-                .join("\n")
-    Tempfile.create(["thumb_text", ".txt"]) do |tf|
-      tf.write(lines)
-      tf.flush
-      _, _, status = Open3.capture3(
-        "convert", "-background", "white", "-fill", "#374151",
-        "-font", "Courier", "-pointsize", "8", "-size", "360x460",
-        "caption:@#{tf.path}", dest_path
-      )
-      status.success?
-    end
+    snippet = File.readlines(source_path, encoding: "utf-8:binary", invalid: :replace, undef: :replace)
+                  .first(45)
+                  .map { |l| l.rstrip[0, 70] }
+                  .join("\n")
+    _, _, status = Open3.capture3(
+      "convert",
+      "-size", "360x460", "xc:white",
+      "-pointsize", "8",
+      "-fill", "#374151",
+      "-gravity", "NorthWest",
+      "-annotate", "+4+12",
+      snippet,
+      dest_path
+    )
+    status.success?
   end
 
   def normalized_nas_username
