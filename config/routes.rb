@@ -20,6 +20,7 @@ Rails.application.routes.draw do
     get    "/info",          to: "files#info"
     get    "/dirs",          to: "files#dirs"
     get    "/download/*path", to: "files#download", format: false
+    get    "/thumb/*path",   to: "files#thumb",    format: false
     delete "/delete/*path",   to: "files#destroy",  format: false
 
     # NAS (SMB) integration

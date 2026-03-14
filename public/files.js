@@ -369,6 +369,10 @@ function createTile(winId, item, idx, currentPath) {
     preview = '<span class="folder-icon">&#128193;</span>';
   } else if (isImage(item.name)) {
     preview = `<img class="tile-thumb" src="${imagePreviewUrl(ws, itemPath)}" alt="${esc(item.name)}" loading="lazy">`;
+  } else if (isPdf(item.name) && ws.type === 'local') {
+    const thumbSrc = '/thumb/' + encodeURIComponent(itemPath);
+    const badge = fileBadge(item.name);
+    preview = `<img class="tile-thumb" src="${thumbSrc}" alt="${esc(item.name)}" loading="lazy" onerror="this.parentNode.innerHTML=${JSON.stringify(badge)}">`;
   } else {
     preview = fileBadge(item.name);
   }

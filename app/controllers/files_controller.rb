@@ -1,6 +1,8 @@
 require "fileutils"
 require "find"
 require "cgi"
+require "open3"
+require "digest"
 require_relative "../services/smb_client"
 
 class FilesController < ApplicationController
@@ -111,6 +113,33 @@ class FilesController < ApplicationController
     return render json: { error: "Not found" }, status: :not_found unless path&.exist?
     path.directory? ? FileUtils.rm_rf(path.to_s) : File.delete(path.to_s)
     render json: { ok: true }
+  end
+
+  # GET /thumb/*path — first-page JPEG thumbnail for a PDF (cached on disk)
+  def thumb
+    path = safe_user_path(params[:path].to_s)
+    return head(:not_found) unless path&.exist? && path.file?
+    return head(:unsupported_media_type) unless path.extname.downcase == ".pdf"
+
+    cache_dir = Rails.root.join("storage", "thumbs", @current_user.username.to_s)
+    FileUtils.mkdir_p(cache_dir)
+    cache_key  = Digest::SHA256.hexdigest(path.to_s)
+    cache_path = cache_dir.join("#{cache_key}.jpg")
+
+    unless cache_path.exist?
+      prefix = cache_dir.join(cache_key).to_s
+      out, err, status = Open3.capture3(
+        "pdftoppm", "-r", "108", "-f", "1", "-l", "1", "-jpeg", "-jpegopt", "quality=82",
+        path.to_s, prefix
+      )
+      # pdftoppm names the output <prefix>-1.jpg (or -01.jpg, etc.)
+      generated = Dir["#{prefix}*.jpg"].min
+      return head(:unprocessable_entity) unless status.success? && generated && File.exist?(generated)
+
+      FileUtils.mv(generated, cache_path.to_s)
+    end
+
+    send_file cache_path.to_s, type: "image/jpeg", disposition: "inline"
   end
 
   # ── Settings actions ───────────────────────────────────────────────────────
