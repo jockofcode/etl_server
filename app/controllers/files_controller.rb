@@ -6,6 +6,12 @@ require "digest"
 require_relative "../services/smb_client"
 
 class FilesController < ApplicationController
+  TEXT_PREVIEW_EXTS = %w[
+    txt md log csv
+    rb py js ts jsx tsx html css json yml yaml sh go rs swift
+    java c cpp h cs php erb haml slim
+  ].freeze
+
   before_action :require_browser_auth
   skip_before_action :require_browser_auth, only: [:logout]
 
@@ -119,7 +125,11 @@ class FilesController < ApplicationController
   def thumb
     path = safe_user_path(params[:path].to_s)
     return head(:not_found) unless path&.exist? && path.file?
-    return head(:unsupported_media_type) unless path.extname.downcase == ".pdf"
+
+    ext    = path.extname.delete_prefix(".").downcase
+    is_pdf  = ext == "pdf"
+    is_text = TEXT_PREVIEW_EXTS.include?(ext)
+    return head(:unsupported_media_type) unless is_pdf || is_text
 
     cache_dir = Rails.root.join("storage", "thumbs", @current_user.username.to_s)
     FileUtils.mkdir_p(cache_dir)
@@ -127,16 +137,18 @@ class FilesController < ApplicationController
     cache_path = cache_dir.join("#{cache_key}.jpg")
 
     unless cache_path.exist?
-      prefix = cache_dir.join(cache_key).to_s
-      out, err, status = Open3.capture3(
-        "pdftoppm", "-r", "108", "-f", "1", "-l", "1", "-jpeg", "-jpegopt", "quality=82",
-        path.to_s, prefix
-      )
-      # pdftoppm names the output <prefix>-1.jpg (or -01.jpg, etc.)
-      generated = Dir["#{prefix}*.jpg"].min
-      return head(:unprocessable_entity) unless status.success? && generated && File.exist?(generated)
-
-      FileUtils.mv(generated, cache_path.to_s)
+      if is_pdf
+        prefix = cache_dir.join(cache_key).to_s
+        _, _, status = Open3.capture3(
+          "pdftoppm", "-r", "108", "-f", "1", "-l", "1", "-jpeg", "-jpegopt", "quality=82",
+          path.to_s, prefix
+        )
+        generated = Dir["#{prefix}*.jpg"].min
+        return head(:unprocessable_entity) unless status.success? && generated && File.exist?(generated)
+        FileUtils.mv(generated, cache_path.to_s)
+      else
+        return head(:unprocessable_entity) unless generate_text_thumb(path.to_s, cache_path.to_s)
+      end
     end
 
     send_file cache_path.to_s, type: "image/jpeg", disposition: "inline"
@@ -298,8 +310,12 @@ class FilesController < ApplicationController
     return if performed?
 
     nas_path = params[:path].to_s.strip
-    return head(:bad_request)             if nas_path.blank? || nas_path =~ /["\\\x00]/
-    return head(:unsupported_media_type)  unless File.extname(nas_path).downcase == ".pdf"
+    return head(:bad_request) if nas_path.blank? || nas_path =~ /["\\\x00]/
+
+    ext     = File.extname(nas_path).delete_prefix(".").downcase
+    is_pdf  = ext == "pdf"
+    is_text = TEXT_PREVIEW_EXTS.include?(ext)
+    return head(:unsupported_media_type) unless is_pdf || is_text
 
     cache_dir = Rails.root.join("storage", "thumbs", "nas", @current_user.username.to_s)
     FileUtils.mkdir_p(cache_dir)
@@ -307,7 +323,7 @@ class FilesController < ApplicationController
     cache_path = cache_dir.join("#{cache_key}.jpg")
 
     unless cache_path.exist?
-      tf = Tempfile.new(["nas_pdf", ".pdf"])
+      tf = Tempfile.new(["nas_dl", ".#{ext}"])
       tf.close
 
       result = SmbClient.get(
@@ -323,17 +339,21 @@ class FilesController < ApplicationController
         return head(:unprocessable_entity)
       end
 
-      prefix = cache_dir.join(cache_key).to_s
-      _, _, status = Open3.capture3(
-        "pdftoppm", "-r", "108", "-f", "1", "-l", "1", "-jpeg", "-jpegopt", "quality=82",
-        tf.path, prefix
-      )
-      tf.unlink
-
-      generated = Dir["#{prefix}*.jpg"].min
-      return head(:unprocessable_entity) unless status.success? && generated && File.exist?(generated)
-
-      FileUtils.mv(generated, cache_path.to_s)
+      if is_pdf
+        prefix = cache_dir.join(cache_key).to_s
+        _, _, status = Open3.capture3(
+          "pdftoppm", "-r", "108", "-f", "1", "-l", "1", "-jpeg", "-jpegopt", "quality=82",
+          tf.path, prefix
+        )
+        tf.unlink
+        generated = Dir["#{prefix}*.jpg"].min
+        return head(:unprocessable_entity) unless status.success? && generated && File.exist?(generated)
+        FileUtils.mv(generated, cache_path.to_s)
+      else
+        ok = generate_text_thumb(tf.path, cache_path.to_s)
+        tf.unlink
+        return head(:unprocessable_entity) unless ok
+      end
     end
 
     send_file cache_path.to_s, type: "image/jpeg", disposition: "inline"
@@ -463,6 +483,23 @@ class FilesController < ApplicationController
   end
 
   private
+
+  def generate_text_thumb(source_path, dest_path)
+    lines = File.readlines(source_path, encoding: "utf-8:binary", invalid: :replace, undef: :replace)
+                .first(60)
+                .map { |l| l.rstrip[0, 95] }
+                .join("\n")
+    Tempfile.create(["thumb_text", ".txt"]) do |tf|
+      tf.write(lines)
+      tf.flush
+      _, _, status = Open3.capture3(
+        "convert", "-background", "white", "-fill", "#374151",
+        "-font", "Courier", "-pointsize", "8", "-size", "360x460",
+        "caption:@#{tf.path}", dest_path
+      )
+      status.success?
+    end
+  end
 
   def normalized_nas_username
     params[:username].to_s.strip.downcase
