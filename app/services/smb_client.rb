@@ -48,6 +48,17 @@ module SmbClient
         command: "mkdir \"#{smb_path(path)}\"")
   end
 
+  # Rename a file or directory within the share. old_path and new_name are
+  # both relative to the share root (slash-separated). new_name is just the
+  # basename; the item stays in the same directory.
+  def self.rename(share:, path:, new_name:, username:, password:)
+    dir      = File.dirname(path).then { |d| d == "." ? "" : smb_path(d) }
+    old_name = File.basename(path)
+    cd       = dir.empty? ? "" : "cd \"#{dir}\"; "
+    run(share: share, username: username, password: password,
+        command: "#{cd}rename \"#{old_name}\" \"#{new_name}\"")
+  end
+
   # Delete a file or directory from the share. path is slash-separated.
   def self.delete(share:, path:, username:, password:)
     dir  = File.dirname(path).then { |d| d == "." ? "" : smb_path(d) }

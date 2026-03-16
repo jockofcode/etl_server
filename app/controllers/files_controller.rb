@@ -50,6 +50,18 @@ class FilesController < ApplicationController
   end
 
   # POST /mkdir  body: { path: "relative/from/root/newdir" }
+  # POST /rename  body: { path:, name: }
+  def rename
+    src  = safe_user_path(params[:path].to_s)
+    name = File.basename(params[:name].to_s.strip)
+    return render json: { error: "Not found" },       status: :not_found          unless src&.exist?
+    return render json: { error: "Invalid name" },    status: :bad_request        if name.blank? || name.include?("/") || name.start_with?(".")
+    target = src.dirname.join(name)
+    return render json: { error: "Already exists" },  status: :conflict           if target.exist?
+    FileUtils.mv(src.to_s, target.to_s)
+    render json: { ok: true }
+  end
+
   # POST /copy  body: { items: [rel_paths], destination: rel_path }
   def copy_files
     dest = safe_sub_path(params[:destination].to_s)
@@ -460,6 +472,32 @@ class FilesController < ApplicationController
     end
   end
 
+  # POST /nas/rename  body: { account_id:, path:, name: }
+  def nas_rename
+    account = selected_nas_account
+    return if performed?
+
+    nas_path = params[:path].to_s.strip
+    new_name = File.basename(params[:name].to_s.strip)
+    return render json: { error: "Invalid path" }, status: :bad_request if nas_path.blank? || nas_path =~ /["\\\x00]/
+    return render json: { error: "Invalid name" }, status: :bad_request if new_name.blank? || new_name =~ /["\\\x00\/]/
+
+    result = SmbClient.rename(
+      share:    account.username,
+      path:     nas_path,
+      new_name: new_name,
+      username: account.username,
+      password: account.password
+    )
+
+    if result[:success]
+      render json: { ok: true }
+    else
+      msg = result[:error].to_s.lines.grep_v(/^$/).last&.strip || "Rename failed"
+      render json: { error: msg }, status: :unprocessable_entity
+    end
+  end
+
   def nas_mkdir
     account = selected_nas_account
     return if performed?
@@ -823,6 +861,7 @@ class FilesController < ApplicationController
         <div class="ctx" id="itemCtx">
           <button id="ctxDownloadBtn"  onclick="ctxDownload()">&#8659;&ensp;Download</button>
           <button id="ctxNasDlBtn"     onclick="ctxDownload()">&#8659;&ensp;Download from NAS</button>
+          <button id="ctxRenameBtn"    onclick="ctxRename()">&#9998;&ensp;Rename&hellip;</button>
           <button id="ctxMoveBtn"      onclick="ctxMove()">&#8680;&ensp;Move&hellip;</button>
           <button id="ctxCopyBtn"      onclick="ctxCopy()">&#10064;&ensp;Copy</button>
           <hr>
@@ -923,6 +962,20 @@ class FilesController < ApplicationController
             <div class="modal-actions">
               <button class="btn btn-secondary" onclick="closeModal('changePasswordModal')">Cancel</button>
               <button class="btn btn-primary" id="changePasswordBtn" onclick="savePasswordChange()">Update Password</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rename modal -->
+        <div class="overlay" id="renameModal" hidden>
+          <div class="modal">
+            <h3>&#9998; Rename</h3>
+            <label>New name</label>
+            <input type="text" id="renameInput" maxlength="255" autocomplete="off" spellcheck="false">
+            <p class="field-error" id="renameError" hidden></p>
+            <div class="modal-actions">
+              <button class="btn btn-secondary" onclick="closeModal('renameModal')">Cancel</button>
+              <button class="btn btn-primary" id="renameConfirmBtn" onclick="confirmRename()">Rename</button>
             </div>
           </div>
         </div>

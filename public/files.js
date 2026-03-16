@@ -600,6 +600,7 @@ function winContextMenu(e, winId) {
     const isFile = tile.dataset.type === 'file';
     const local  = ws.type === 'local';
     const nas = ws.type === 'nas';
+    document.getElementById('ctxRenameBtn').style.display    = (!multi && (local || nas)) ? '' : 'none';
     document.getElementById('ctxDownloadBtn').style.display  = (!multi && isFile && local) ? '' : 'none';
     document.getElementById('ctxNasDlBtn').style.display     = (!multi && isFile && nas) ? '' : 'none';
     document.getElementById('ctxMoveBtn').style.display      = local ? '' : 'none';
@@ -645,6 +646,42 @@ function ctxDelete() {
 }
 function ctxInfo()    { hideCtx(); openInfo(ctxTargetTile, ctxWinId); }
 function ctxMove()    { hideCtx(); openMoveModal(ctxWinId); }
+function ctxRename() {
+  hideCtx();
+  const input = document.getElementById('renameInput');
+  input.value = ctxTargetTile?.dataset.name || '';
+  document.getElementById('renameError').hidden = true;
+  document.getElementById('renameConfirmBtn').disabled = false;
+  document.getElementById('renameModal').removeAttribute('hidden');
+  setTimeout(() => { input.focus(); input.select(); }, 50);
+}
+async function confirmRename() {
+  const name   = document.getElementById('renameInput').value.trim();
+  const errEl  = document.getElementById('renameError');
+  const btn    = document.getElementById('renameConfirmBtn');
+  const ws     = windows.get(ctxWinId);
+  errEl.hidden = true;
+  if (!name) { errEl.textContent = 'Name is required'; errEl.hidden = false; return; }
+  if (!ctxTargetTile || !ws) return;
+  btn.disabled = true;
+  try {
+    let r;
+    if (ws.type === 'nas') {
+      r = await fetch('/nas/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: ws.accountId, path: ctxTargetTile.dataset.path, name }) });
+    } else {
+      r = await fetch('/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: ctxTargetTile.dataset.path, name }) });
+    }
+    const d = await readJsonResponse(r);
+    if (r.ok) { closeModal('renameModal'); loadWindow(ctxWinId, ws.path); }
+    else { errEl.textContent = d.error || 'Rename failed'; errEl.hidden = false; }
+  } finally { btn.disabled = false; }
+}
+document.getElementById('renameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') confirmRename();
+  if (e.key === 'Escape') closeModal('renameModal');
+});
 function ctxCopy() {
   hideCtx();
   const ws = windows.get(ctxWinId);

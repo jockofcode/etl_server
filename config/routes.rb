@@ -17,6 +17,7 @@ Rails.application.routes.draw do
     post   "/upload",        to: "files#upload"
     post   "/mkdir",         to: "files#mkdir"
     post   "/copy",          to: "files#copy_files"
+    post   "/rename",        to: "files#rename"
     post   "/move",          to: "files#move"
     get    "/info",          to: "files#info"
     get    "/dirs",          to: "files#dirs"
@@ -36,6 +37,7 @@ Rails.application.routes.draw do
     post "/nas/copy-from-nas",    to: "files#nas_copy_from_nas"
     post "/nas/mkdir",            to: "files#nas_mkdir"
     post   "/nas/upload",          to: "files#nas_upload"
+    post   "/nas/rename",          to: "files#nas_rename"
     delete "/nas/delete/*path",    to: "files#nas_destroy",       format: false
     get  "/nas/transfers",        to: "files#nas_transfers"
     get  "/nas/thumb/*path",      to: "files#nas_thumb",         format: false
