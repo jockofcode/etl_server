@@ -50,6 +50,21 @@ class FilesController < ApplicationController
   end
 
   # POST /mkdir  body: { path: "relative/from/root/newdir" }
+  # POST /copy  body: { items: [rel_paths], destination: rel_path }
+  def copy_files
+    dest = safe_sub_path(params[:destination].to_s)
+    return render json: { error: "Invalid destination" }, status: :bad_request unless dest&.directory?
+
+    items = Array(params[:items]).filter_map { |p| safe_user_path(p.to_s) }.select(&:exist?)
+    return render json: { error: "Nothing to copy" }, status: :bad_request if items.empty?
+
+    items.each do |src|
+      target = dest.join(src.basename)
+      src.directory? ? FileUtils.cp_r(src.to_s, target.to_s) : FileUtils.cp(src.to_s, target.to_s)
+    end
+    render json: { ok: true }
+  end
+
   def mkdir
     path = params[:path].to_s.strip
     return render json: { error: "Path required" }, status: :bad_request if path.blank?
@@ -422,6 +437,29 @@ class FilesController < ApplicationController
     end
   end
 
+  # DELETE /nas/delete/*path?account_id=
+  def nas_destroy
+    account = selected_nas_account
+    return if performed?
+
+    nas_path = params[:path].to_s.strip
+    return head(:bad_request) if nas_path.blank? || nas_path =~ /["\\\x00]/
+
+    result = SmbClient.delete(
+      share:    account.username,
+      path:     nas_path,
+      username: account.username,
+      password: account.password
+    )
+
+    if result[:success]
+      render json: { ok: true }
+    else
+      msg = result[:error].to_s.lines.grep_v(/^$/).last&.strip || "Delete failed"
+      render json: { error: msg }, status: :unprocessable_entity
+    end
+  end
+
   def nas_mkdir
     account = selected_nas_account
     return if performed?
@@ -778,6 +816,7 @@ class FilesController < ApplicationController
         <!-- Context menus -->
         <div class="ctx" id="bgCtx">
           <button onclick="bgCtxNewFolder()">&#128193;&ensp;New Folder</button>
+          <button id="bgCtxPaste" onclick="bgCtxPaste()">&#10064;&ensp;Paste</button>
           <hr>
           <button id="bgCtxInfo" onclick="openInfo(null,ctxWinId)">&#8505;&ensp;Get Info</button>
         </div>
@@ -785,7 +824,7 @@ class FilesController < ApplicationController
           <button id="ctxDownloadBtn"  onclick="ctxDownload()">&#8659;&ensp;Download</button>
           <button id="ctxNasDlBtn"     onclick="ctxDownload()">&#8659;&ensp;Download from NAS</button>
           <button id="ctxMoveBtn"      onclick="ctxMove()">&#8680;&ensp;Move&hellip;</button>
-          <button id="ctxNasCopyBtn"   onclick="ctxNasCopy()">&#128421;&ensp;Copy to NAS&hellip;</button>
+          <button id="ctxCopyBtn"      onclick="ctxCopy()">&#10064;&ensp;Copy</button>
           <hr>
           <button id="ctxInfoBtn"      onclick="ctxInfo()">&#8505;&ensp;Get Info</button>
           <hr>

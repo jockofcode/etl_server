@@ -595,15 +595,17 @@ function winContextMenu(e, winId) {
     const multi  = ws.selectedPaths.size > 1;
     const isFile = tile.dataset.type === 'file';
     const local  = ws.type === 'local';
+    const nas = ws.type === 'nas';
     document.getElementById('ctxDownloadBtn').style.display  = (!multi && isFile && local) ? '' : 'none';
-    document.getElementById('ctxNasDlBtn').style.display     = (!multi && isFile && ws.type === 'nas') ? '' : 'none';
+    document.getElementById('ctxNasDlBtn').style.display     = (!multi && isFile && nas) ? '' : 'none';
     document.getElementById('ctxMoveBtn').style.display      = local ? '' : 'none';
-    document.getElementById('ctxNasCopyBtn').style.display   = (isFile && local) ? '' : 'none';
-    document.getElementById('ctxInfoBtn').style.display      = (!multi && local) ? '' : 'none';
-    document.getElementById('ctxDeleteBtn').style.display    = local ? '' : 'none';
+    document.getElementById('ctxCopyBtn').style.display       = (isFile && (local || nas)) ? '' : 'none';
+    document.getElementById('ctxInfoBtn').style.display      = !multi ? '' : 'none';
+    document.getElementById('ctxDeleteBtn').style.display    = (local || nas) ? '' : 'none';
     itemCtx.style.cssText = 'left:-9999px;top:-9999px'; itemCtx.classList.add('visible'); positionCtx(itemCtx, e);
   } else {
-    document.getElementById('bgCtxInfo').style.display = ws.type === 'local' ? '' : 'none';
+    document.getElementById('bgCtxInfo').style.display  = ws.type === 'local' ? '' : 'none';
+    document.getElementById('bgCtxPaste').style.display = (copyClipboard && copyClipboard.winId !== ctxWinId) ? '' : 'none';
     bgCtx.style.cssText = 'left:-9999px;top:-9999px'; bgCtx.classList.add('visible'); positionCtx(bgCtx, e);
   }
 }
@@ -627,23 +629,61 @@ function ctxDelete() {
   if (!items.length) return;
   const label = items.length === 1 ? '"' + items[0].split('/').pop() + '"' : items.length + ' items';
   if (!confirm('Delete ' + label + '?')) return;
-  Promise.all(items.map(p => fetch('/delete/' + encodeURIComponent(p), { method: 'DELETE' })))
-    .then(() => loadWindow(ctxWinId, ws.path));
+  if (ws.type === 'nas') {
+    Promise.all(items.map(p => fetch(
+      '/nas/delete/' + encodeURIComponent(p) + '?account_id=' + encodeURIComponent(ws.accountId || ''),
+      { method: 'DELETE' }
+    ))).then(() => loadWindow(ctxWinId, ws.path));
+  } else {
+    Promise.all(items.map(p => fetch('/delete/' + encodeURIComponent(p), { method: 'DELETE' })))
+      .then(() => loadWindow(ctxWinId, ws.path));
+  }
 }
 function ctxInfo()    { hideCtx(); openInfo(ctxTargetTile, ctxWinId); }
 function ctxMove()    { hideCtx(); openMoveModal(ctxWinId); }
-function ctxNasCopy() {
+function ctxCopy() {
   hideCtx();
   const ws = windows.get(ctxWinId);
   if (!ws) return;
-  const fp = Array.from(ws.selectedPaths).filter(p => document.querySelector(`.tile[data-path="${CSS.escape(p)}"][data-type="file"]`));
-  if (!fp.length) return;
-  nasCopySource = fp[0];
-  document.getElementById('nasCopyTitle').textContent = 'Copy \u201c' + nasCopySource.split('/').pop() + '\u201d to NAS';
-  if (!nasAccounts.length) { alert('Link a NAS account first.'); return; }
-  populateNasCopyAccountOptions();
-  changeNasCopyAccount(nasCopyAccountId || String(nasAccounts[0].id));
-  document.getElementById('nasCopyModal').removeAttribute('hidden');
+  const paths = Array.from(ws.selectedPaths);
+  if (!paths.length) return;
+  copyClipboard = { paths, winId: ctxWinId, accountId: ws.accountId || null, type: ws.type };
+}
+async function bgCtxPaste() {
+  hideCtx();
+  if (!copyClipboard) return;
+  const dest = windows.get(ctxWinId);
+  if (!dest) return;
+  const { paths, accountId: srcAccountId, type: srcType } = copyClipboard;
+  if (srcType === 'local' && dest.type === 'local') {
+    const r = await fetch('/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: paths, destination: dest.path }) });
+    if (r.ok) loadWindow(ctxWinId, dest.path);
+    else { const d = await readJsonResponse(r); alert('Error: ' + (d.error || 'Copy failed')); }
+  } else if (srcType === 'local' && dest.type === 'nas') {
+    for (const p of paths) {
+      const r = await fetch('/nas/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: dest.accountId, local_path: p, nas_path: dest.path }) });
+      const d = await readJsonResponse(r);
+      if (r.ok && d.queued) startTransferPolling();
+      else { alert('Error: ' + (d.error || 'Copy failed')); break; }
+    }
+  } else if (srcType === 'nas' && dest.type === 'local') {
+    for (const p of paths) {
+      const r = await fetch('/nas/copy-from-nas', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: srcAccountId, nas_path: p, local_path: dest.path }) });
+      if (r.ok) loadWindow(ctxWinId, dest.path);
+      else { const d = await readJsonResponse(r); alert('Error: ' + (d.error || 'Copy failed')); break; }
+    }
+  } else if (srcType === 'nas' && dest.type === 'nas') {
+    for (const p of paths) {
+      const r = await fetch('/nas/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: dest.accountId, source_account_id: srcAccountId, source_nas_path: p, nas_path: dest.path }) });
+      const d = await readJsonResponse(r);
+      if (r.ok && d.queued) startTransferPolling();
+      else { alert('Error: ' + (d.error || 'Copy failed')); break; }
+    }
+  }
 }
 function bgCtxNewFolder() { hideCtx(); openWinCreateDir(ctxWinId); }
 
@@ -700,7 +740,7 @@ function confirmCreateDir() {
 // ── Info modal ───────────────────────────────────────────────────────────────
 function openInfo(tile, winId) {
   const ws = windows.get(winId);
-  if (!ws || ws.type !== 'local') return;
+  if (!ws) return;
   const path = tile ? tile.dataset.path : ws.path;
   document.getElementById('infoTitle').textContent = tile ? tile.dataset.name : (ws.path.split('/').pop() || 'Home');
   document.getElementById('infoContent').innerHTML = '<p style="color:#9ca3af;font-size:.8rem">Loading\u2026</p>';
@@ -710,12 +750,15 @@ function openInfo(tile, winId) {
     document.getElementById('infoContent').innerHTML =
       '<table class="info-table"><tr><td>Kind</td><td>File</td></tr><tr><td>Size</td><td>' + esc(tile.dataset.size) +
       '</td></tr><tr><td>Modified</td><td>' + mtime + '</td></tr></table>';
-  } else {
+  } else if (ws.type === 'local') {
     fetch('/info?path=' + encodeURIComponent(path)).then(r => r.json()).then(d => {
       document.getElementById('infoContent').innerHTML =
         '<table class="info-table"><tr><td>Kind</td><td>Folder</td></tr><tr><td>Files</td><td>' + d.files +
         '</td></tr><tr><td>Subfolders</td><td>' + d.dirs + '</td></tr><tr><td>Total size</td><td>' + humanizeBytes(d.size) + '</td></tr></table>';
     });
+  } else {
+    document.getElementById('infoContent').innerHTML =
+      '<table class="info-table"><tr><td>Kind</td><td>Folder</td></tr></table>';
   }
 }
 
@@ -783,7 +826,8 @@ document.addEventListener('keydown', e => {
 });
 
 // ── NAS ──────────────────────────────────────────────────────────────────────
-let nasAccounts = [], nasCopySource = null, nasCopyDest = '', nasCopyAccountId = '', nasEditingAccountId = null;
+let copyClipboard = null; // { paths, winId, accountId, type }
+let nasAccounts = [], nasCopySource = null, nasCopySourceAccountId = null, nasCopyDest = '', nasCopyAccountId = '', nasEditingAccountId = null;
 
 function setNasAccounts(accounts) {
   nasAccounts = (accounts || []).map(account => ({ id: String(account.id), username: account.username }));
@@ -1024,8 +1068,11 @@ async function confirmNasCopy() {
   const btn = document.getElementById('nasCopyConfirmBtn');
   btn.textContent = 'Queuing\u2026'; btn.disabled = true;
   try {
+    const payload = nasCopySourceAccountId
+      ? { account_id: nasCopyAccountId, source_account_id: nasCopySourceAccountId, source_nas_path: nasCopySource, nas_path: nasCopyDest }
+      : { account_id: nasCopyAccountId, local_path: nasCopySource, nas_path: nasCopyDest };
     const r = await fetch('/nas/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_id: nasCopyAccountId, local_path: nasCopySource, nas_path: nasCopyDest }) });
+      body: JSON.stringify(payload) });
     const d = await r.json();
     if (r.ok && d.queued) { closeModal('nasCopyModal'); startTransferPolling(); }
     else alert('Error: ' + (d.error || 'Failed'));

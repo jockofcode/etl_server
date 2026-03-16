@@ -48,6 +48,19 @@ module SmbClient
         command: "mkdir \"#{smb_path(path)}\"")
   end
 
+  # Delete a file or directory from the share. path is slash-separated.
+  def self.delete(share:, path:, username:, password:)
+    dir  = File.dirname(path).then { |d| d == "." ? "" : smb_path(d) }
+    name = File.basename(path)
+    cd   = dir.empty? ? "" : "cd \"#{dir}\"; "
+    # Try file deletion first; fall back to rmdir for directories.
+    result = run(share: share, username: username, password: password,
+                 command: "#{cd}del \"#{name}\"")
+    return result if result[:success]
+    run(share: share, username: username, password: password,
+        command: "rmdir \"#{smb_path(path)}\"")
+  end
+
   # Quick connectivity check — just lists the root of the share.
   def self.test(share:, username:, password:)
     run(share: share, username: username, password: password, command: "ls *")
