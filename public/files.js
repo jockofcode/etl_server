@@ -14,6 +14,7 @@ async function readJsonResponse(response) {
   try { return JSON.parse(text); }
   catch { return { error: text || `Request failed (${response.status})` }; }
 }
+const ARCHIVE_EXTS      = new Set(['zip','tar','gz','bz2','rar','7z','tgz','xz','zst']);
 const IMAGE_EXTS        = new Set(['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif']);
 const VIDEO_EXTS        = new Set(['mp4','mov','avi','mkv','webm','m4v','ogv']);
 const PDF_EXTS          = new Set(['pdf']);
@@ -24,6 +25,7 @@ const TEXT_PREVIEW_EXTS = new Set([
 ]);
 function isImage(name) { return IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function isVideo(name) { return VIDEO_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
+function isArchive(name)      { return ARCHIVE_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function isPdf(name)          { return PDF_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function isTextPreview(name)  { return TEXT_PREVIEW_EXTS.has((name.split('.').pop() || '').toLowerCase()); }
 function pdfThumbError(img) { img.parentNode.innerHTML = fileBadge(img.dataset.name); }
@@ -374,6 +376,8 @@ function createTile(winId, item, idx, currentPath) {
   let preview;
   if (item.type === 'dir') {
     preview = '<span class="folder-icon">&#128193;</span>';
+  } else if (isArchive(item.name)) {
+    preview = '<span class="archive-icon">&#128230;</span>';
   } else if (isImage(item.name)) {
     preview = `<img class="tile-thumb" src="${imagePreviewUrl(ws, itemPath)}" alt="${esc(item.name)}" loading="lazy">`;
   } else if ((isPdf(item.name) || isTextPreview(item.name)) && (ws.type === 'local' || ws.type === 'nas')) {
